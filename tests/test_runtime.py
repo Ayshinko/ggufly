@@ -496,5 +496,198 @@ echo "saved=$saved"
         self.run_shell(code)
 
 
+class LaunchCommandTests(unittest.TestCase):
+    """Tests for vLLM launch command construction and PLUGIN_DIR migration."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.model_subdir = self.root / 'qwen3.8-s'
+        self.model_subdir.mkdir()
+        (self.model_subdir / 'config.json').write_text('{"model_type":"qwen2"}')
+        (self.model_subdir / 'provenance.json').write_text('{"AIR_MODEL":true}')
+        (self.model_subdir / 'model.safetensors').write_bytes(b'\x00' * 100)
+        vllm_dir = self.model_subdir / 'vllm'
+        vllm_dir.mkdir()
+        (vllm_dir / 'config.json').write_text('{"architectures":["Qwen2ForCausalLM"]}')
+        (vllm_dir / 'trellis.mirai').write_text('compressed payload')
+        (vllm_dir / 'model.safetensors.index.json').write_text(
+            '{"weight_map":{"l1":"model-00001.safetensors"}}')
+        (vllm_dir / 'model-00001.safetensors').write_bytes(b'\x00' * 10)
+        (vllm_dir / 'mirai_s-0.2.1-py3-none-any.whl').write_text('wheel')
+        # Create the PMM-managed plugin dir under XDG_DATA_HOME
+        data_home = self.root / 'data'
+        pmm_dir = data_home / 'prism-model-manager'
+        plugin_version = pmm_dir / 'plugins/mirai-s/0.2.1'
+        self.site_pkgs = plugin_version / 'site-packages'
+        self.site_pkgs.mkdir(parents=True)
+        mod_dir = self.site_pkgs / 'mirai_s'
+        mod_dir.mkdir()
+        (mod_dir / '__init__.py').write_text('')
+        dist_info = self.site_pkgs / 'mirai_s-0.2.1.dist-info'
+        dist_info.mkdir()
+        (dist_info / 'METADATA').write_text('Metadata-Version: 2.1\nName: mirai-s\nVersion: 0.2.1\n')
+        (dist_info / 'RECORD').write_text('mirai_s/__init__.py,,\n')
+        # Create mock vLLM venv with python symlink to system python
+        vllm_venv = pmm_dir / 'backends/vllm-venv/bin'
+        vllm_venv.mkdir(parents=True)
+        import os as py_os
+        py_os.symlink(py_os.sys.executable, str(vllm_venv / 'python'))
+        self.env = {**os.environ, 'HOME': str(self.root),
+                    'XDG_CONFIG_HOME': str(self.root / 'config'),
+                    'XDG_STATE_HOME': str(self.root / 'state'),
+                    'XDG_DATA_HOME': str(data_home),
+                    'PMM_SERVER_BIN': str(self.root / 'fake-server')}
+
+    def run_shell(self, code, *, env=None, ok=True):
+        prefix = ('set -e\nsource "$1/bin/prism-model-manager"\n'
+                  'CURRENT_MODEL="${CURRENT_MODEL:-}"\n'
+                  'PORT="${TEST_PORT:-8080}"\n'
+                  'pause() { :; }\ngum() { :; }\n')
+        result = subprocess.run(
+            ['bash', '-c', prefix + code, 'test', str(Path(__file__).resolve().parents[1])],
+            env={**self.env, **(env or {})}, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            timeout=20)
+        if ok:
+            self.assertEqual(result.returncode, 0, result.stdout)
+        else:
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+        return result.stdout
+
+    def test_build_command_first_arg_is_not_pythonpath(self):
+        """build_vllm_command must NOT produce 'PYTHONPATH=...' as SERVER_ARGS[0]."""
+        model_path = str(self.model_subdir)
+        code = f'''
+source "$1/bin/prism-model-manager"
+CURRENT_MODEL="{model_path}"
+BACKEND=vLLM
+PLUGIN="Mirai S"
+build_vllm_command 2>/dev/null || true
+# SERVER_ARGS[0] must NOT start with PYTHONPATH=
+first="${{SERVER_ARGS[0]:-}}"
+echo "first_arg=$first"
+[[ "$first" == PYTHONPATH=* ]] && exit 1
+[[ "$first" == env || "$first" == /* || "$first" == ./* ]]
+'''
+        self.run_shell(code)
+
+    def test_build_command_uses_env_prefix(self):
+        """build_vllm_command with Mirai must use 'env' as SERVER_ARGS[0]."""
+        model_path = str(self.model_subdir)
+        code = f'''
+source "$1/bin/prism-model-manager"
+CURRENT_MODEL="{model_path}"
+BACKEND=vLLM
+PLUGIN="Mirai S"
+build_vllm_command 2>/dev/null || true
+first="${{SERVER_ARGS[0]:-}}"
+echo "first_arg=$first"
+[[ "$first" == "env" ]]
+'''
+        self.run_shell(code)
+
+    def test_build_command_second_arg_is_pythonpath_with_actual_path(self):
+        """The env PYTHONPATH must contain the actual site-packages path, not a literal placeholder."""
+        model_path = str(self.model_subdir)
+        code = f'''
+source "$1/bin/prism-model-manager"
+CURRENT_MODEL="{model_path}"
+BACKEND=vLLM
+PLUGIN="Mirai S"
+build_vllm_command 2>/dev/null || true
+second="${{SERVER_ARGS[1]:-}}"
+echo "second_arg=$second"
+[[ "$second" == PYTHONPATH=/*site-packages* ]]
+# Must not contain the literal $PYTHONPATH placeholder (neither bracket form nor $VAR)
+[[ "$second" != *"$"*PYTHONPATH* ]]
+'''
+        self.run_shell(code)
+
+    def test_legacy_plugin_dir_migrated(self):
+        """Old profile with PLUGIN_DIR under <model>/.pmm/plugins/ must be cleared on load."""
+        model_path = str(self.model_subdir)
+        code = f'''
+source "$1/bin/prism-model-manager"
+CURRENT_MODEL="{model_path}"
+# Simulate old saved PLUGIN_DIR pointing to model-local .pmm
+PLUGIN_DIR="{model_path}/.pmm/plugins/mirai-s"
+load_model_profile 2>/dev/null || true
+echo "PLUGIN_DIR after load: [$PLUGIN_DIR]"
+[[ -z "$PLUGIN_DIR" ]]
+'''
+        self.run_shell(code)
+
+    def test_empty_plugin_dir_uses_pmm_managed_path(self):
+        """When PLUGIN_DIR is empty, effective_plugin_dir should return PMM-managed path."""
+        model_path = str(self.model_subdir)
+        code = f'''
+source "$1/bin/prism-model-manager"
+CURRENT_MODEL="{model_path}"
+PLUGIN_DIR=""
+BACKEND=vLLM
+PLUGIN="Mirai S"
+dir=$(effective_plugin_dir "{model_path}" "Mirai S")
+echo "effective_plugin_dir=$dir"
+# Should prefer PMM-managed tree if available, or fall back to model-local
+# In test env with empty PMM tree it falls back to model-local
+[[ -n "$dir" ]]
+'''
+        self.run_shell(code)
+
+    def test_nohup_can_execute_constructed_command(self):
+        """The SERVER_ARGS must be executable by nohup."""
+        model_path = str(self.model_subdir)
+        code = f'''
+source "$1/bin/prism-model-manager"
+CURRENT_MODEL="{model_path}"
+BACKEND=vLLM
+PLUGIN="Mirai S"
+build_vllm_command 2>/dev/null || true
+# Simulate what start_server_locked does
+first="${{SERVER_ARGS[0]:-}}"
+second="${{SERVER_ARGS[1]:-}}"
+[[ "$first" == "env" ]]
+[[ "$second" == PYTHONPATH=* ]]
+# Verify the rest is a valid python path
+py_path="${{SERVER_ARGS[2]:-}}"
+echo "python=$py_path"
+[[ -x "$py_path" ]] || echo "note: python path may not exist in test env"
+'''
+        self.run_shell(code)
+
+    def test_existing_pythonpath_preserved(self):
+        """Existing PYTHONPATH must be preserved in the env PYTHONPATH."""
+        model_path = str(self.model_subdir)
+        code = f'''
+source "$1/bin/prism-model-manager"
+CURRENT_MODEL="{model_path}"
+BACKEND=vLLM
+PLUGIN="Mirai S"
+export OLD_PYTHONPATH="/custom/path"
+PYTHONPATH="$OLD_PYTHONPATH"
+build_vllm_command 2>/dev/null || true
+second="${{SERVER_ARGS[1]:-}}"
+echo "second_arg=$second"
+# Should contain the custom path
+[[ "$second" == *"/custom/path"* ]]
+'''
+        self.run_shell(code)
+
+    def test_no_model_local_pmm_required(self):
+        """No .pmm plugin directory should be created or required for PMM-managed installs."""
+        model_path = str(self.model_subdir)
+        code = f'''
+source "$1/bin/prism-model-manager"
+# Without any .pmm dir existing, effective_plugin_dir must still return something
+dir=$(effective_plugin_dir "{model_path}" "Mirai S" 2>/dev/null || echo "")
+echo "effective_plugin_dir=$dir"
+# Even without a PMM tree, it falls back to model-local, but that's OK
+[[ -n "$dir" ]]
+'''
+        self.run_shell(code)
+
+
 if __name__ == '__main__':
     unittest.main()

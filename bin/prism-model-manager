@@ -190,7 +190,7 @@ VLLM_MAX_MODEL_LEN="-1"
 VLLM_MAX_NUM_SEQS="16"
 VLLM_MAX_BATCHED_TOKENS="2048"
 
-# Plugin directory (per-model, editable). '' means default: <model-dir>/.pmm/plugins/<plugin-name>
+# Plugin directory (per-model, editable). '' means default: PMM-managed plugin tree
 PLUGIN_DIR=""
 LORA_ENABLED="off"
 LORA_SCALE="2"
@@ -1483,7 +1483,9 @@ build_vllm_command() {
     local served_model_name
     served_model_name=$(basename "$model_path")
 
-    SERVER_ARGS=(
+    # Build the base command (python -m vllm.entrypoints...)
+    local -a cmd
+    cmd=(
         "$py"
         -m vllm.entrypoints.openai.api_server
         --model "$runtime_path"
@@ -1501,17 +1503,26 @@ build_vllm_command() {
     if [ "$effective_plugin" = "Mirai S" ]; then
         local plugin_dir
         plugin_dir=$(effective_plugin_dir "$CURRENT_MODEL" "Mirai S")
-        # Add plugin directory to PYTHONPATH so mirai_s can be imported
-        # Use process-scoped PYTHONPATH — do not permanently mutate the vLLM venv.
-        # Preserve any existing PYTHONPATH if present.
+        # Build SERVER_ARGS with env prefix for process-scoped PYTHONPATH.
+        # This prevents "PYTHONPATH=..." from being treated as argv[0].
+        # Preserve any existing PYTHONPATH at launch time.
         local site_pkgs="$plugin_dir/site-packages"
         if [ -d "$site_pkgs" ]; then
-            SERVER_ARGS=("PYTHONPATH=$site_pkgs:\${PYTHONPATH:-}" "${SERVER_ARGS[@]}")
+            # Use env so the variable is set in the child's environment, not argv
+            SERVER_ARGS=(
+                env
+                "PYTHONPATH=$site_pkgs${PYTHONPATH:+:$PYTHONPATH}"
+                "${cmd[@]}"
+            )
+        else
+            SERVER_ARGS=("${cmd[@]}")
         fi
         SERVER_ARGS+=(--reasoning-parser qwen3)
         if [ "$MTP" = "on" ]; then
             SERVER_ARGS+=(--speculative-config '{"method":"mtp","num_speculative_tokens":4}')
         fi
+    else
+        SERVER_ARGS=("${cmd[@]}")
     fi
 
     if [ "$MAX_OUTPUT_TOKENS" != "-1" ]; then
@@ -1687,6 +1698,24 @@ load_model_profile() {
     if [ -f "$profile" ]; then
         # shellcheck disable=SC1090
         source "$profile"
+    fi
+
+    # ── Migrate legacy PLUGIN_DIR ──────────────────────────────
+    # Old profiles stored PLUGIN_DIR under the model-local .pmm path:
+    #   <model-dir>/.pmm/plugins/<plugin>
+    # The new architecture uses PMM-managed plugin tree:
+    #   ~/.local/share/prism-model-manager/plugins/<name>/<version>/site-packages
+    # Migrate by clearing PLUGIN_DIR so effective_plugin_dir() resolves
+    # the PMM-managed installation automatically.
+    if [ -n "$PLUGIN_DIR" ]; then
+        local expected_legacy
+        expected_legacy=$(effective_plugin_dir "$CURRENT_MODEL" "None" 2>/dev/null || echo "")
+        # effective_plugin_dir with plugin=None returns the .pmm/plugins/None directory
+        # Check if PLUGIN_DIR is under <model-root>/.pmm/
+        if [ -n "$CURRENT_MODEL" ] && [[ "$PLUGIN_DIR" == */.pmm/plugins/* ]]; then
+            debug "  Migrating legacy PLUGIN_DIR='$PLUGIN_DIR' -> clearing for PMM-managed plugin tree"
+            PLUGIN_DIR=""
+        fi
     fi
 }
 
