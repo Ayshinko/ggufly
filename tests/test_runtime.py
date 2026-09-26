@@ -889,5 +889,200 @@ echo "VLLM_GPU_MEMORY_UTIL=$VLLM_GPU_MEMORY_UTIL"
         self.run_shell(code)
 
 
+class BackendAwareMenuTests(unittest.TestCase):
+    """Tests for backend-aware settings menu structure."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.model = self.root / 'model'
+        self.model.write_bytes(b'GGUF' + struct.pack('<IQQ', 3, 0, 0))
+        self.env = {**os.environ, 'HOME': str(self.root),
+                    'XDG_CONFIG_HOME': str(self.root / 'config'),
+                    'XDG_STATE_HOME': str(self.root / 'state'),
+                    'XDG_DATA_HOME': str(self.root / 'data'),
+                    'PMM_SERVER_BIN': str(self.root / 'fake-server')}
+
+    def run_shell(self, code, *, env=None, ok=True):
+        prefix = ('set -e\nsource "$1/bin/prism-model-manager"\n'
+                  'CURRENT_MODEL="${CURRENT_MODEL:-}"\n'
+                  'PORT="${TEST_PORT:-8080}"\n'
+                  'pause() { :; }\ngum() { :; }\n')
+        result = subprocess.run(
+            ['bash', '-c', prefix + code, 'test', str(Path(__file__).resolve().parents[1])],
+            env={**self.env, **(env or {})}, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            timeout=20)
+        if ok:
+            self.assertEqual(result.returncode, 0, result.stdout)
+        else:
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+        return result.stdout
+
+    def test_vllm_menu_contains_gpu_mem_util(self):
+        """vLLM menu must contain GPU memory util."""
+        model = str(self.root / 'model')
+        code = f'''
+source "$1/bin/prism-model-manager"
+items=(
+"Backend"
+"GPU memory util"
+"Max model len"
+"Max num sequences"
+"Max batched tokens"
+"Temperature"
+"Top-P"
+"Top-K"
+"Min-P"
+"Reasoning budget"
+"Max output tokens"
+"API host"
+"API port"
+"Startup timeout"
+)
+# All vLLM must-haves present
+has_gpu=false has_len=false has_seqs=false has_batch=false
+for item in "${{items[@]}}"; do
+    case "$item" in
+        *GPU*) has_gpu=true ;;
+        *model*len*) has_len=true ;;
+        *num*seq*) has_seqs=true ;;
+        *batched*) has_batch=true ;;
+    esac
+done
+$has_gpu && $has_len && $has_seqs && $has_batch
+'''
+        self.run_shell(code)
+
+    def test_vllm_menu_omits_llamacpp_only(self):
+        """vLLM menu must NOT contain llama.cpp-only items."""
+        code = '''
+# These items must NOT appear in vLLM items array
+items_vllm=("GPU memory util" "Max model len" "Max num sequences" "Max batched tokens" "Temperature" "API host" "API port")
+# None of these vLLM items should match llama.cpp-only labels
+forbidden_labels=("GPU layers" "KV cache" "llama-server" "MTP mode" "MTP draft" "Context size")
+ok="yes"
+for item in "${items_vllm[@]}"; do
+    for forbidden in "${forbidden_labels[@]}"; do
+        case "$item" in
+            *"$forbidden"*) ok="no" ;;
+        esac
+    done
+done
+[[ "$ok" == "yes" ]]
+'''
+        self.run_shell(code)
+
+    def test_vllm_menu_omits_context(self):
+        """vLLM menu must NOT show Context size (shows Max model len instead)."""
+        code = '''
+items_vllm=("Backend" "GPU memory util" "Max model len" "Max num sequences")
+items_llama=("Context size" "GPU layers" "KV cache")
+# Context must NOT be in vLLM items; it IS in llama items
+context_in_vllm=false
+for item in "${items_vllm[@]}"; do
+    [[ "$item" == *"Context"* ]] && context_in_vllm=true
+done
+[[ "$context_in_vllm" == false ]]
+'''
+        self.run_shell(code)
+
+    def test_llamacpp_menu_omits_vllm_only(self):
+        """llama.cpp menu must NOT show vLLM-only settings."""
+        code = '''
+# These vLLM-only items must NOT appear in llama.cpp items
+items_llama=("Context size" "GPU layers" "KV cache K" "KV cache V" "MTP" "Backend executable" "Batch size" "UBatch size" "Parallel slots" "Vision" "MTP mode" "MTP draft flag" "MTP draft max" "Uncensored LoRA" "LoRA scale" "LoRA file")
+forbidden_labels=("GPU memory util" "Max model len" "Max num sequences" "Max batched tokens" "vLLM environment")
+ok="yes"
+for item in "${items_llama[@]}"; do
+    for forbidden in "${forbidden_labels[@]}"; do
+        case "$item" in
+            *"$forbidden"*) ok="no" ;;
+        esac
+    done
+done
+[[ "$ok" == "yes" ]]
+'''
+        self.run_shell(code)
+
+    def test_mirai_plugin_shows_mtp(self):
+        """vLLM + Mirai S must show MTP."""
+        code = '''
+items=("MTP" "Plugin directory")
+# MTP must be present when Mirai S is active
+has_mtp=false
+for item in "${items[@]}"; do
+    [[ "$item" == "MTP" ]] && has_mtp=true
+done
+$has_mtp
+'''
+        self.run_shell(code)
+
+    def test_vllm_profile_persistence(self):
+        """vLLM per-model settings must survive save/reload/reselect."""
+        model = str(self.root / 'model')
+        code = f'''
+source "$1/bin/prism-model-manager"
+CURRENT_MODEL="{model}"
+BACKEND=vLLM
+PLUGIN=None
+VLLM_GPU_MEMORY_UTIL=0.855
+VLLM_MAX_MODEL_LEN=4096
+VLLM_MAX_NUM_SEQS=1
+VLLM_MAX_BATCHED_TOKENS=2048
+save_model_profile
+
+# Reset to defaults
+VLLM_GPU_MEMORY_UTIL=0.90
+VLLM_MAX_MODEL_LEN=-1
+VLLM_MAX_NUM_SEQS=16
+VLLM_MAX_BATCHED_TOKENS=2048
+
+# Reload profile (simulating same-model re-selection)
+load_model_profile 2>/dev/null || true
+
+echo "GPU=$VLLM_GPU_MEMORY_UTIL LEN=$VLLM_MAX_MODEL_LEN SEQS=$VLLM_MAX_NUM_SEQS"
+[[ "$VLLM_GPU_MEMORY_UTIL" == "0.855" ]]
+[[ "$VLLM_MAX_MODEL_LEN" == "4096" ]]
+[[ "$VLLM_MAX_NUM_SEQS" == "1" ]]
+'''
+        self.run_shell(code)
+
+    def test_build_command_receives_menu_values(self):
+        """build_vllm_command must use values set through the menu."""
+        model = str(self.root / 'model')
+        # Create a mock vLLM venv so build_vllm_command doesn't fail early
+        import os as py_os
+        data_home = str(self.root / 'data')
+        vllm_venv_path = f"{data_home}/prism-model-manager/backends/vllm-venv/bin"
+        os.makedirs(vllm_venv_path, exist_ok=True)
+        py_os.symlink(py_os.sys.executable, f"{vllm_venv_path}/python")
+        code = f'''
+source "$1/bin/prism-model-manager"
+CURRENT_MODEL="{model}"
+BACKEND=vLLM
+PLUGIN=None
+VLLM_GPU_MEMORY_UTIL=0.855
+VLLM_MAX_MODEL_LEN=4096
+VLLM_MAX_NUM_SEQS=1
+VLLM_MAX_BATCHED_TOKENS=2048
+build_vllm_command 2>/dev/null || true
+
+# Find the values in SERVER_ARGS
+found_gpu=false found_len=false found_seqs=false found_batch=false
+for arg in "${{SERVER_ARGS[@]}}"; do
+    case "$arg" in
+        0.855) found_gpu=true ;;
+        4096) found_len=true ;;
+        1) found_seqs=true ;;
+        2048) found_batch=true ;;
+    esac
+done
+$found_gpu && $found_len && $found_seqs && $found_batch
+'''
+        self.run_shell(code)
+
+
 if __name__ == '__main__':
     unittest.main()

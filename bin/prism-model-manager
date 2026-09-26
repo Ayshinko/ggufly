@@ -2115,12 +2115,34 @@ status_screen() {
     printf '  %-17s ' "Model"
     printf '%b%s%b\n' "$C_CYAN" "${model_label:-None}" "$C_RESET"
 
-    printf '  %-17s %s\n' "Context" "$CTX"
-    printf '  %-17s %s\n' "GPU layers" "$NGL"
-    printf '  %-17s %s\n' "Flash Attention" "$FLASH"
-    printf '  %-17s %s\n' "Batch / UBatch" "$BATCH / $UBATCH"
-    printf '  %-17s %s\n' "Parallel" "$PARALLEL"
-    printf '  %-17s %s\n' "KV cache K/V" "$CACHE_K / $CACHE_V"
+    local effective_backend effective_plugin
+    effective_backend=$(resolve_backend "$CURRENT_MODEL")
+    effective_plugin=$(resolve_plugin "$CURRENT_MODEL")
+    printf '  %-17s %s\n' "Backend" "$effective_backend"
+    if [ -n "$effective_plugin" ] && [ "$effective_plugin" != "None" ]; then
+        printf '  %-17s %s\n' "Plugin" "$effective_plugin"
+    fi
+
+    # ── llama.cpp profile ──
+    if [ "$effective_backend" = "llama.cpp" ]; then
+        printf '  %-17s %s\n' "Context" "$CTX"
+        printf '  %-17s %s\n' "GPU layers" "$NGL"
+        printf '  %-17s %s\n' "Flash Attention" "$FLASH"
+        printf '  %-17s %s\n' "Batch / UBatch" "$BATCH / $UBATCH"
+        printf '  %-17s %s\n' "Parallel" "$PARALLEL"
+        printf '  %-17s %s\n' "KV cache K/V" "$CACHE_K / $CACHE_V"
+
+    # ── vLLM profile ──
+    elif [ "$effective_backend" = "vLLM" ]; then
+        printf '  %-17s %s\n' "GPU memory util" "$VLLM_GPU_MEMORY_UTIL"
+        printf '  %-17s %s\n' "Max model len" "$VLLM_MAX_MODEL_LEN"
+        printf '  %-17s %s\n' "Max num seqs" "$VLLM_MAX_NUM_SEQS"
+        printf '  %-17s %s\n' "Max batched tokens" "$VLLM_MAX_BATCHED_TOKENS"
+        if [ "$effective_plugin" = "Mirai S" ]; then
+            printf '  %-17s %s\n' "MTP" "$MTP"
+        fi
+    fi
+
     printf '  %-17s %s\n' "Temperature" "$TEMP"
     printf '  %-17s %s\n' "Top-P / Top-K" "$TOP_P / $TOP_K"
     printf '  %-17s %s\n' "Min-P" "$MIN_P"
@@ -2141,13 +2163,14 @@ status_screen() {
     fi
     printf '\n'
 
-    local vision_label="${MMPROJ_PATH:-auto or adjacent projector}"
-    printf '  %-17s %s (%s)\n' "Vision" "$VISION" "$vision_label"
-    printf '  %-17s %s (%s, draft max %s)\n' "MTP" "$MTP" "$MTP_MODE" "$MTP_DRAFT_MAX"
-
-    lora_label="off"
-    [ "$LORA_ENABLED" = "on" ] && lora_label="Uncensored x$LORA_SCALE"
-    printf '  %-17s %b%s%b\n' "LoRA" "$C_MAGENTA" "$lora_label" "$C_RESET"
+    if [ "$effective_backend" = "llama.cpp" ]; then
+        local vision_label="${MMPROJ_PATH:-auto or adjacent projector}"
+        printf '  %-17s %s (%s)\n' "Vision" "$VISION" "$vision_label"
+        printf '  %-17s %s (%s, draft max %s)\n' "MTP" "$MTP" "$MTP_MODE" "$MTP_DRAFT_MAX"
+        lora_label="off"
+        [ "$LORA_ENABLED" = "on" ] && lora_label="Uncensored x$LORA_SCALE"
+        printf '  %-17s %b%s%b\n' "LoRA" "$C_MAGENTA" "$lora_label" "$C_RESET"
+    fi
 
     # ── GPU panel ──
     echo
@@ -2303,52 +2326,60 @@ settings_menu() {
             # Backend / Plugin selection
             "Backend               [$(resolve_backend "$CURRENT_MODEL")]"
             "Plugin                [$(resolve_plugin "$CURRENT_MODEL")]"
-            # Common settings
-            "Context size          [$CTX]"
-            "Temperature           [$TEMP]"
-            "Top-P                 [$TOP_P]"
-            "Top-K                 [$TOP_K]"
-            "Min-P                 [$MIN_P]"
-            "Reasoning budget      [$REASONING_BUDGET]"
-            "Max output tokens     [$MAX_OUTPUT_TOKENS]"
-            "API host              [$HOST]"
-            "API port              [$PORT]"
-            "Startup timeout       [$STARTUP_TIMEOUT]"
         )
 
+        # ── llama.cpp settings ──
         if [ "$effective_backend" = "llama.cpp" ]; then
             items+=(
-            # llama.cpp-specific settings
-            "GPU layers            [$NGL]"
-            "Flash Attention       [$FLASH]"
-            "Batch size            [$BATCH]"
-            "UBatch size           [$UBATCH]"
-            "Parallel slots        [$PARALLEL]"
-            "KV cache K            [$CACHE_K]"
-            "KV cache V            [$CACHE_V]"
-            "Vision                [$VISION]"
-            "Projector path        [${MMPROJ_PATH:-auto}]"
-            "MTP                   [$MTP]"
-            "MTP mode              [$MTP_MODE]"
-            "MTP draft flag        [$MTP_DRAFT_FLAG]"
-            "MTP draft max         [$MTP_DRAFT_MAX]"
-            "Backend executable    [$SERVER_BIN]"
-            "Uncensored LoRA       [$LORA_ENABLED]"
-            "LoRA scale            [$LORA_SCALE]"
-            "LoRA file             [$(basename "$LORA_PATH")]"
+                "Context size          [$CTX]"
+                "GPU layers            [$NGL]"
+                "Flash Attention       [$FLASH]"
+                "Batch size            [$BATCH]"
+                "UBatch size           [$UBATCH]"
+                "Parallel slots        [$PARALLEL]"
+                "KV cache K            [$CACHE_K]"
+                "KV cache V            [$CACHE_V]"
+                "Temperature           [$TEMP]"
+                "Top-P                 [$TOP_P]"
+                "Top-K                 [$TOP_K]"
+                "Min-P                 [$MIN_P]"
+                "Reasoning budget      [$REASONING_BUDGET]"
+                "Max output tokens     [$MAX_OUTPUT_TOKENS]"
+                "Vision                [$VISION]"
+                "Projector path        [${MMPROJ_PATH:-auto}]"
+                "MTP                   [$MTP]"
+                "MTP mode              [$MTP_MODE]"
+                "MTP draft flag        [$MTP_DRAFT_FLAG]"
+                "MTP draft max         [$MTP_DRAFT_MAX]"
+                "Backend executable    [$SERVER_BIN]"
+                "Uncensored LoRA       [$LORA_ENABLED]"
+                "LoRA scale            [$LORA_SCALE]"
+                "LoRA file             [$(basename "$LORA_PATH")]"
+                "API host              [$HOST]"
+                "API port              [$PORT]"
+                "Startup timeout       [$STARTUP_TIMEOUT]"
             )
+
+        # ── vLLM settings ──
         elif [ "$effective_backend" = "vLLM" ]; then
             items+=(
-            # vLLM-specific settings
-            "vLLM environment      [$VLLM_ROOT]"
-            "GPU memory util       [$VLLM_GPU_MEMORY_UTIL]"
-            "Max model len         [$VLLM_MAX_MODEL_LEN]"
-            "Max num sequences     [$VLLM_MAX_NUM_SEQS]"
-            "Max batched tokens    [$VLLM_MAX_BATCHED_TOKENS]"
+                "GPU memory util       [$VLLM_GPU_MEMORY_UTIL]"
+                "Max model len         [$VLLM_MAX_MODEL_LEN]"
+                "Max num sequences     [$VLLM_MAX_NUM_SEQS]"
+                "Max batched tokens    [$VLLM_MAX_BATCHED_TOKENS]"
+                "Temperature           [$TEMP]"
+                "Top-P                 [$TOP_P]"
+                "Top-K                 [$TOP_K]"
+                "Min-P                 [$MIN_P]"
+                "Reasoning budget      [$REASONING_BUDGET]"
+                "Max output tokens     [$MAX_OUTPUT_TOKENS]"
+                "API host              [$HOST]"
+                "API port              [$PORT]"
+                "Startup timeout       [$STARTUP_TIMEOUT]"
             )
             if [ "$effective_plugin" = "Mirai S" ]; then
                 items+=(
-                "Plugin directory      [$(effective_plugin_dir "$CURRENT_MODEL" "$effective_plugin")]"
+                "MTP                   [$MTP]"
                 )
             fi
         fi
@@ -2357,6 +2388,17 @@ settings_menu() {
             "Model root            [$MODEL_ROOT]"
         )
 
+        if [ "$effective_backend" = "vLLM" ]; then
+            items+=(
+            "vLLM environment      [$VLLM_ROOT]"
+            )
+            if [ "$effective_plugin" = "Mirai S" ]; then
+                items+=(
+                "Plugin directory      [$(effective_plugin_dir "$CURRENT_MODEL" "$effective_plugin")]"
+                )
+            fi
+        fi
+
         if [ "$mode" = "load" ]; then
             items+=("▶ Start with these settings")
         fi
@@ -2364,12 +2406,16 @@ settings_menu() {
         items+=("Back")
 
         local previous
-        previous=$(declare -p CTX TEMP TOP_P TOP_K MIN_P REASONING_BUDGET MAX_OUTPUT_TOKENS HOST PORT STARTUP_TIMEOUT BACKEND PLUGIN PLUGIN_DIR MODEL_ROOT)
+        previous=$(declare -p HOST PORT STARTUP_TIMEOUT BACKEND PLUGIN PLUGIN_DIR MODEL_ROOT TEMP TOP_P TOP_K MIN_P REASONING_BUDGET MAX_OUTPUT_TOKENS)
         if [ "$effective_backend" = "llama.cpp" ]; then
-            previous="$previous"$'\n'"$(declare -p NGL FLASH BATCH UBATCH PARALLEL CACHE_K CACHE_V VISION MMPROJ_PATH MTP MTP_MODE MTP_DRAFT_MAX MTP_DRAFT_FLAG SERVER_BIN LORA_ENABLED LORA_SCALE LORA_PATH)"
+            previous="$previous"$'\n'"$(declare -p CTX NGL FLASH BATCH UBATCH PARALLEL CACHE_K CACHE_V VISION MMPROJ_PATH MTP MTP_MODE MTP_DRAFT_MAX MTP_DRAFT_FLAG SERVER_BIN LORA_ENABLED LORA_SCALE LORA_PATH)"
         fi
         if [ "$effective_backend" = "vLLM" ]; then
             previous="$previous"$'\n'"$(declare -p VLLM_GPU_MEMORY_UTIL VLLM_MAX_MODEL_LEN VLLM_MAX_NUM_SEQS VLLM_MAX_BATCHED_TOKENS)"
+            # Also save MTP if Mirai S (for vLLM's benefit)
+            if [ "$effective_plugin" = "Mirai S" ]; then
+                previous="$previous"$'\n'"$(declare -p MTP)"
+            fi
         fi
         local choice
         choice=$(printf '%s
@@ -2399,10 +2445,6 @@ settings_menu() {
                 CTX=$(gum input \
                     --value="$CTX" \
                     --placeholder "8192 / 16384 / 32768 / 65536")
-                # For vLLM backend, sync context to max-model-len
-                if [ "$effective_backend" = "vLLM" ]; then
-                    VLLM_MAX_MODEL_LEN="$CTX"
-                fi
                 ;;
 
             "Max model len"*)
@@ -2558,12 +2600,6 @@ on
                 VLLM_GPU_MEMORY_UTIL=$(gum input \
                     --value="$VLLM_GPU_MEMORY_UTIL" \
                     --placeholder "0.90 = fraction of GPU memory")
-                ;;
-
-            "Max model len"*)
-                VLLM_MAX_MODEL_LEN=$(gum input \
-                    --value="$VLLM_MAX_MODEL_LEN" \
-                    --placeholder "-1 = auto-fill GPU, or specific token count")
                 ;;
 
             "Max num sequences"*)
