@@ -22,7 +22,7 @@ echo "=== Prism Model Manager Uninstaller ==="
 
 for name in prism-model-manager prism-backend-manager prism-backend-detect.py \
             prism-model-detect.py prism-lora-ab-score.py prism-gguf-info.py \
-            prism-backend-info.py prism-model-manager-launcher; do
+            prism-backend-info.py prism-model-manager-launcher pmm-vllm; do
     target="$PMM_BIN/$name"
     if [ -f "$target" ] || [ -L "$target" ]; then
         rm -f "$target"
@@ -73,7 +73,8 @@ fi
 # ── Desktop entries ──────────────────────────
 
 APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-for desktop in prism-model-manager.desktop prism-model-manager-terminal.desktop; do
+for desktop in prism-model-manager.desktop prism-model-manager-terminal.desktop \
+               prism-model-manager-vllm.desktop; do
     if [ -f "$APPS_DIR/$desktop" ]; then
         rm -f "$APPS_DIR/$desktop"
         echo "  Removed:    $APPS_DIR/$desktop"

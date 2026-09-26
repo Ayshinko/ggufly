@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# pmm-vllm — Alternative command name for the vLLM/extended edition.
+#
+# This is the same script as prism-model-manager but with a distinct
+# command name, making it possible to have both the official GGUF
+# edition (pmm) and the extended vLLM edition (pmm-vllm) installed
+# side by side on the same system.
+#
+# This wrapper is provided by the experimental/vllm branch.
+# See https://github.com/Ayshinko/prism-model-manager/tree/experimental/vllm
+
+exec "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/prism-model-manager" "$@"

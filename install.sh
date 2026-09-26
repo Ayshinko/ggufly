@@ -128,9 +128,15 @@ if [ -f "$ROOT/compatibility.json" ]; then
     echo "  Installed: $COMPAT_DEST/compatibility.json"
 fi
 
-# Symlink
+# Symlink (primary: pmm)
 ln -sf "$PMM_BIN/prism-model-manager" "$PMM_BIN/pmm"
 echo "  Created:    $PMM_BIN/pmm -> prism-model-manager"
+
+# vLLM edition alias (secondary: pmm-vllm)
+if [ ! -f "$PMM_BIN/pmm-vllm" ]; then
+    ln -sf "$PMM_BIN/prism-model-manager" "$PMM_BIN/pmm-vllm"
+    echo "  Created:    $PMM_BIN/pmm-vllm -> prism-model-manager"
+fi
 
 # Desktop launcher
 LAUNCHER_SCRIPT="$PMM_BIN/prism-model-manager-launcher"
@@ -148,7 +154,7 @@ LAUNCHER
 chmod 755 "$LAUNCHER_SCRIPT"
 echo "  Installed:  $LAUNCHER_SCRIPT"
 
-# Desktop entries
+# Desktop entries — standard and vLLM edition
 APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 mkdir -p "$APPS_DIR"
 for variant in "" "-terminal"; do
@@ -165,6 +171,19 @@ Categories=Development;Utility;
 Keywords=LLM;AI;llama.cpp;vLLM;Mirai;
 DESKTOP
 done
+# Additional desktop entry for vLLM edition (pmm-vllm)
+cat > "$APPS_DIR/prism-model-manager-vllm.desktop" << DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Prism Model Manager — vLLM (Experimental)
+GenericName=Local AI Model Manager
+Comment=Extended edition with vLLM, HuggingFace Safetensors and Mirai S support
+Exec=$PMM_BIN/pmm-vllm
+Icon=utilities-terminal
+Terminal=true
+Categories=Development;Utility;
+Keywords=LLM;AI;vLLM;Mirai;HuggingFace;
+DESKTOP
 echo "  Installed:  Desktop entries"
 
 # ── 4. Offline: bundled llama.cpp backend ─────
