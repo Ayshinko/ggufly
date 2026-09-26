@@ -1083,6 +1083,23 @@ $found_gpu && $found_len && $found_seqs && $found_batch
 '''
         self.run_shell(code)
 
+    def test_vllm_menu_omits_request_params(self):
+        """vLLM menu must NOT contain request-generation params: Temperature, Top-P/K, Min-P, Reasoning budget, Max output tokens."""
+        code = '''
+items_vllm=("GPU memory util" "Max model len" "Max num sequences" "Max batched tokens" "API host" "API port" "Startup timeout" "MTP")
+request_params=("Temperature" "Top-P" "Top-K" "Min-P" "Reasoning" "Max output")
+ok="yes"
+for item in "${items_vllm[@]}"; do
+    for rp in "${request_params[@]}"; do
+        if [[ "$item" == *"$rp"* ]]; then
+            ok="no"
+        fi
+    done
+done
+[[ "$ok" == "yes" ]]
+'''
+        self.run_shell(code)
+
 
 if __name__ == '__main__':
     unittest.main()

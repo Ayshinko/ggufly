@@ -2367,12 +2367,6 @@ settings_menu() {
                 "Max model len         [$VLLM_MAX_MODEL_LEN]"
                 "Max num sequences     [$VLLM_MAX_NUM_SEQS]"
                 "Max batched tokens    [$VLLM_MAX_BATCHED_TOKENS]"
-                "Temperature           [$TEMP]"
-                "Top-P                 [$TOP_P]"
-                "Top-K                 [$TOP_K]"
-                "Min-P                 [$MIN_P]"
-                "Reasoning budget      [$REASONING_BUDGET]"
-                "Max output tokens     [$MAX_OUTPUT_TOKENS]"
                 "API host              [$HOST]"
                 "API port              [$PORT]"
                 "Startup timeout       [$STARTUP_TIMEOUT]"
@@ -2406,9 +2400,9 @@ settings_menu() {
         items+=("Back")
 
         local previous
-        previous=$(declare -p HOST PORT STARTUP_TIMEOUT BACKEND PLUGIN PLUGIN_DIR MODEL_ROOT TEMP TOP_P TOP_K MIN_P REASONING_BUDGET MAX_OUTPUT_TOKENS)
+        previous=$(declare -p HOST PORT STARTUP_TIMEOUT BACKEND PLUGIN PLUGIN_DIR MODEL_ROOT)
         if [ "$effective_backend" = "llama.cpp" ]; then
-            previous="$previous"$'\n'"$(declare -p CTX NGL FLASH BATCH UBATCH PARALLEL CACHE_K CACHE_V VISION MMPROJ_PATH MTP MTP_MODE MTP_DRAFT_MAX MTP_DRAFT_FLAG SERVER_BIN LORA_ENABLED LORA_SCALE LORA_PATH)"
+            previous="$previous"$'\n'"$(declare -p CTX NGL FLASH BATCH UBATCH PARALLEL CACHE_K CACHE_V VISION MMPROJ_PATH MTP MTP_MODE MTP_DRAFT_MAX MTP_DRAFT_FLAG SERVER_BIN LORA_ENABLED LORA_SCALE LORA_PATH TEMP TOP_P TOP_K MIN_P REASONING_BUDGET MAX_OUTPUT_TOKENS)"
         fi
         if [ "$effective_backend" = "vLLM" ]; then
             previous="$previous"$'\n'"$(declare -p VLLM_GPU_MEMORY_UTIL VLLM_MAX_MODEL_LEN VLLM_MAX_NUM_SEQS VLLM_MAX_BATCHED_TOKENS)"
