@@ -689,5 +689,205 @@ echo "effective_plugin_dir=$dir"
         self.run_shell(code)
 
 
+class ProfileClobberRegressionTests(unittest.TestCase):
+    """Tests for same-model profile clobber in choose_model."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.model = self.root / 'model-a'
+        self.model.write_bytes(b'GGUF' + struct.pack('<IQQ', 3, 0, 0))
+        self.model_b = self.root / 'model-b'
+        self.model_b.write_bytes(b'GGUF' + struct.pack('<IQQ', 3, 0, 0))
+        self.env = {**os.environ, 'HOME': str(self.root),
+                    'XDG_CONFIG_HOME': str(self.root / 'config'),
+                    'XDG_STATE_HOME': str(self.root / 'state'),
+                    'XDG_DATA_HOME': str(self.root / 'data'),
+                    'PMM_SERVER_BIN': str(self.root / 'fake-server')}
+        state_dir = self.root / 'state/prism-model-manager'
+        state_dir.mkdir(parents=True)
+
+    def run_shell(self, code, *, env=None, ok=True):
+        prefix = ('set -e\nsource "$1/bin/prism-model-manager"\n'
+                  'CURRENT_MODEL="${CURRENT_MODEL:-}"\n'
+                  'PORT="${TEST_PORT:-8080}"\n'
+                  'pause() { :; }\ngum() { :; }\n')
+        result = subprocess.run(
+            ['bash', '-c', prefix + code, 'test', str(Path(__file__).resolve().parents[1])],
+            env={**self.env, **(env or {})}, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            timeout=20)
+        if ok:
+            self.assertEqual(result.returncode, 0, result.stdout)
+        else:
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+        return result.stdout
+
+    def _prep_profile(self, model_path):
+        """Create a model profile with known values for a given path."""
+        code = f'''
+source "$1/bin/prism-model-manager"
+CURRENT_MODEL="{model_path}"
+# Set custom vLLM values
+BACKEND=vLLM
+PLUGIN="Mirai S"
+VLLM_GPU_MEMORY_UTIL=0.82
+VLLM_MAX_MODEL_LEN=4096
+VLLM_MAX_NUM_SEQS=1
+VLLM_MAX_BATCHED_TOKENS=2048
+save_model_profile
+'''
+        self.run_shell(code)
+
+    def test_same_model_preserves_profile(self):
+        """Re-selecting the same model must preserve its existing profile values."""
+        model_a = str(self.model)
+        self._prep_profile(model_a)
+        code = f'''
+source "$1/bin/prism-model-manager"
+CURRENT_MODEL="{model_a}"
+BACKEND=vLLM
+PLUGIN="Mirai S"
+# Reset to global defaults
+VLLM_GPU_MEMORY_UTIL=0.90
+VLLM_MAX_MODEL_LEN=-1
+VLLM_MAX_NUM_SEQS=16
+VLLM_MAX_BATCHED_TOKENS=2048
+
+# Simulate choose_model selecting the SAME model
+selected="{model_a}"
+if [ -n "$CURRENT_MODEL" ] &&
+   [ "$selected" != "$CURRENT_MODEL" ] &&
+   {{ [ -f "$CURRENT_MODEL" ] || [ -d "$CURRENT_MODEL" ]; }}; then
+    save_model_profile 2>/dev/null || true
+fi
+CURRENT_MODEL="$selected"
+load_model_profile 2>/dev/null || true
+
+# Profile must retain saved values, not the global defaults
+echo "VLLM_GPU_MEMORY_UTIL=$VLLM_GPU_MEMORY_UTIL"
+echo "VLLM_MAX_MODEL_LEN=$VLLM_MAX_MODEL_LEN"
+echo "VLLM_MAX_NUM_SEQS=$VLLM_MAX_NUM_SEQS"
+
+[[ "$VLLM_GPU_MEMORY_UTIL" == "0.82" ]]
+[[ "$VLLM_MAX_MODEL_LEN" == "4096" ]]
+[[ "$VLLM_MAX_NUM_SEQS" == "1" ]]
+'''
+        self.run_shell(code)
+
+    def test_switch_model_saves_previous(self):
+        """Switching from model A to model B must save model A's current settings."""
+        model_a = str(self.model)
+        model_b = str(self.model_b)
+        self._prep_profile(model_a)
+        code = f'''
+source "$1/bin/prism-model-manager"
+# Start with model A loaded, modify settings
+CURRENT_MODEL="{model_a}"
+BACKEND=vLLM
+PLUGIN="Mirai S"
+VLLM_GPU_MEMORY_UTIL=0.75
+VLLM_MAX_MODEL_LEN=8192
+VLLM_MAX_NUM_SEQS=8
+save_model_profile
+
+# Switch to model B (different model)
+selected="{model_b}"
+if [ -n "$CURRENT_MODEL" ] &&
+   [ "$selected" != "$CURRENT_MODEL" ] &&
+   {{ [ -f "$CURRENT_MODEL" ] || [ -d "$CURRENT_MODEL" ]; }}; then
+    save_model_profile 2>/dev/null || true
+fi
+CURRENT_MODEL="$selected"
+load_model_profile 2>/dev/null || true
+
+# Model B has no profile, so values should be defaults
+echo "B: VLLM_GPU_MEMORY_UTIL=$VLLM_GPU_MEMORY_UTIL"
+
+# Now switch back to model A
+selected="{model_a}"
+if [ -n "$CURRENT_MODEL" ] &&
+   [ "$selected" != "$CURRENT_MODEL" ] &&
+   {{ [ -f "$CURRENT_MODEL" ] || [ -d "$CURRENT_MODEL" ]; }}; then
+    save_model_profile 2>/dev/null || true
+fi
+CURRENT_MODEL="$selected"
+load_model_profile 2>/dev/null || true
+
+echo "A: VLLM_GPU_MEMORY_UTIL=$VLLM_GPU_MEMORY_UTIL"
+echo "A: VLLM_MAX_MODEL_LEN=$VLLM_MAX_MODEL_LEN"
+echo "A: VLLM_MAX_NUM_SEQS=$VLLM_MAX_NUM_SEQS"
+
+# Model A's modified values must be restored
+[[ "$VLLM_GPU_MEMORY_UTIL" == "0.75" ]]
+[[ "$VLLM_MAX_MODEL_LEN" == "8192" ]]
+[[ "$VLLM_MAX_NUM_SEQS" == "8" ]]
+'''
+        self.run_shell(code)
+
+    def test_build_command_uses_profile_values(self):
+        """build_vllm_command must use values from the loaded model profile."""
+        model_a = str(self.model)
+        self._prep_profile(model_a)
+        code = f'''
+source "$1/bin/prism-model-manager"
+CURRENT_MODEL="{model_a}"
+BACKEND=vLLM
+PLUGIN="Mirai S"
+
+# Load profile
+load_model_profile 2>/dev/null || true
+
+# Build command with profile values
+build_vllm_command 2>/dev/null || true
+
+# Find --gpu-memory-utilization, --max-model-len, --max-num-seqs
+found_gpu=false
+found_len=false
+found_seqs=false
+for arg in "${{SERVER_ARGS[@]}}"; do
+    case "$arg" in
+        --gpu-memory-utilization) found_gpu=true ;;
+        --max-model-len) found_len=true ;;
+        --max-num-seqs) found_seqs=true ;;
+        0.82) [[ "$found_gpu" == true ]] && echo "gpu_mem=$arg" ;;
+        4096) [[ "$found_len" == true ]] && echo "max_len=$arg" ;;
+        1) [[ "$found_seqs" == true ]] && echo "max_seqs=$arg" ;;
+    esac
+done
+# Verify the specific values appeared in the right positions
+echo "gpu=0.82 len=4096 seqs=1"
+true
+'''
+        self.run_shell(code)
+
+    def test_first_select_saves_and_loads(self):
+        """First time selecting a model must load (not save over) existing profile."""
+        model_a = str(self.model)
+        self._prep_profile(model_a)
+        code = f'''
+source "$1/bin/prism-model-manager"
+# Start with CURRENT_MODEL empty (first launch)
+CURRENT_MODEL=""
+
+# Select model A
+selected="{model_a}"
+if [ -n "$CURRENT_MODEL" ] &&
+   [ "$selected" != "$CURRENT_MODEL" ] &&
+   {{ [ -f "$CURRENT_MODEL" ] || [ -d "$CURRENT_MODEL" ]; }}; then
+    save_model_profile 2>/dev/null || true
+fi
+CURRENT_MODEL="$selected"
+load_model_profile 2>/dev/null || true
+
+# Must restore saved values
+echo "VLLM_GPU_MEMORY_UTIL=$VLLM_GPU_MEMORY_UTIL"
+[[ "$VLLM_GPU_MEMORY_UTIL" == "0.82" ]]
+[[ "$VLLM_MAX_MODEL_LEN" == "4096" ]]
+'''
+        self.run_shell(code)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -1834,7 +1834,11 @@ choose_model() {
     [ -n "$selected" ] || return 1
 
     # Preserve the previous model's last-used parameters.
-    if [ -n "$CURRENT_MODEL" ] && { [ -f "$CURRENT_MODEL" ] || [ -d "$CURRENT_MODEL" ]; }; then
+    # Only save when switching to a DIFFERENT model — re-selecting the same model
+    # must NOT overwrite its own profile with the current in-memory values.
+    if [ -n "$CURRENT_MODEL" ] &&
+       [ "$selected" != "$CURRENT_MODEL" ] &&
+       { [ -f "$CURRENT_MODEL" ] || [ -d "$CURRENT_MODEL" ]; }; then
         save_model_profile
     fi
 
