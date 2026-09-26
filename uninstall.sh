@@ -108,9 +108,9 @@ if [ "$FLAG" = "--all" ]; then
         fi
     done
     if [ -d "$BACKENDS_DIR" ]; then
-        echo "  WARNING: Backends directory contains vLLM venv (~4GB) and downloaded backends."
+        echo "  WARNING: Backends directory contains downloaded llama.cpp runtime."
         if command -v gum >/dev/null 2>&1; then
-            if gum confirm "Remove backends directory (contains vLLM venv)?"; then
+            if gum confirm "Remove backends directory?"; then
                 rm -rf "$BACKENDS_DIR"
                 echo "  Removed:    $BACKENDS_DIR"
             fi

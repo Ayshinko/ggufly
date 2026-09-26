@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# build-release.sh — Build PMM 3.5.1 Release Archive
+# build-release.sh — Build PMM 4.0.0 Release Archive
 #
 # Usage: ./packaging/build-release.sh [--offline] [OUTDIR]
 #
 # Modes:
 #   standard (default):  PMM scripts + compatibility manifest.
-#                         llama.cpp and vLLM downloaded on first use.
+#                         llama.cpp downloaded on first use.
 #                         Small archive (~200 KB).
 #
 #   --offline:           Standard + bundled llama.cpp CUDA build.
@@ -13,8 +13,8 @@
 #                         Suitable for systems without internet at install time.
 #
 # Output (in OUTDIR, default dist/):
-#   prism-model-manager-3.5.1-linux-x86_64-standard.tar.gz   (~200 KB)
-#   prism-model-manager-3.5.1-linux-x86_64-offline.tar.gz    (~130 MB)
+#   prism-model-manager-4.0.0-linux-x86_64-standard.tar.gz   (~200 KB)
+#   prism-model-manager-4.0.0-linux-x86_64-offline.tar.gz    (~49 MB)
 #   ...sha256
 #   ...sha256.manifest
 #

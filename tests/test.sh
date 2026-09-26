@@ -205,52 +205,6 @@ check '--api-ready exits nonzero when the API is unreachable'
 )
 check 'set -u startup safety: no unbound variables with empty config'
 
-# ── Regression: find_hf_downloader resolution ──
-# Test 1: No downloaders available returns empty
-(
-    VLLM_ROOT="/nonexistent/venv"
-    VLLM_LEGACY_ROOT="/nonexistent/legacy"
-    vllm_venv_python() { return 1; }
-    result=$(find_hf_downloader)
-    [[ -z "$result" ]]
-)
-check 'find_hf_downloader returns empty when no downloaders exist'
-
-# Test 2: Managed vLLM hf is preferred
-(
-    VLLM_ROOT="$TMP/vllm-venv"
-    mkdir -p "$VLLM_ROOT/bin"
-    cat > "$VLLM_ROOT/bin/hf" <<'HFSCRIPT'
-#!/usr/bin/env bash
-echo "managed-hf"
-exit 0
-HFSCRIPT
-    chmod +x "$VLLM_ROOT/bin/hf"
-    result=$(VLLM_ROOT="$VLLM_ROOT" find_hf_downloader)
-    [[ "$result" == "$VLLM_ROOT/bin/hf" ]]
-)
-check 'find_hf_downloader prefers managed vLLM hf'
-
-# Test 3: Managed vLLM Python fallback
-(
-    VLLM_ROOT="$TMP/vllm-python"
-    mkdir -p "$VLLM_ROOT/bin"
-    cat > "$VLLM_ROOT/bin/python" <<'PYSCRIPT'
-#!/usr/bin/env python3
-import sys
-if len(sys.argv) > 1 and sys.argv[1] == '-c':
-    code = sys.argv[2]
-    if 'import huggingface_hub' in code:
-        exit(0)
-    print('mock python')
-    exit(0)
-exit(1)
-PYSCRIPT
-    chmod +x "$VLLM_ROOT/bin/python"
-    result=$(VLLM_ROOT="$VLLM_ROOT" find_hf_downloader)
-    [[ "$result" == "python_hub:$VLLM_ROOT/bin/python" ]]
-)
-check 'find_hf_downloader falls back to managed vLLM Python'
 
 # Test 4: Float-safe disk comparison
 (
