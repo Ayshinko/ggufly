@@ -1197,9 +1197,16 @@ CURRENT_MODEL="{model}"
 BACKEND=vLLM
 VLLM_MAX_MODEL_LEN="Usage: gum input [flags]..."
 build_vllm_command 2>/dev/null || true
-# Must have sanitized back to -1
+# Must have sanitized to conservative fallback, NOT -1
 echo "sanitized: $VLLM_MAX_MODEL_LEN"
-[[ "$VLLM_MAX_MODEL_LEN" == "-1" ]]
+[[ "$VLLM_MAX_MODEL_LEN" != "-1" ]]
+[[ "$VLLM_MAX_MODEL_LEN" == "4096" ]]
+# Also verify --max-model-len in SERVER_ARGS is 4096, not -1
+found=0
+for arg in "${{SERVER_ARGS[@]}}"; do
+    if [[ "$arg" == "4096" ]]; then found=1; fi
+done
+[[ "$found" == "1" ]]
 '''
         self.run_shell(code)
 

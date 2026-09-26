@@ -1473,6 +1473,18 @@ build_vllm_command() {
 
     validate_settings || return 1
 
+    # Sanitize VLLM_MAX_MODEL_LEN before building the command array.
+    # Accept only: -1, auto, or a positive integer.
+    # Corruption protection prevents gum --help output from reaching vLLM.
+    # NOTE: -1 means model/config maximum (262144 on qwen3.8-27B).
+    # Never use -1 as automatic corruption recovery — that is unsafe
+    # on a 12 GB GPU. Instead, restore a conservative fallback.
+    local conservative_max_len=4096
+    if [[ "$VLLM_MAX_MODEL_LEN" != "-1" ]] && [[ "$VLLM_MAX_MODEL_LEN" != "auto" ]] && ! [[ "$VLLM_MAX_MODEL_LEN" =~ ^[1-9][0-9]*$ ]]; then
+        echo "WARNING: invalid VLLM_MAX_MODEL_LEN='$VLLM_MAX_MODEL_LEN', restoring $conservative_max_len" >&2
+        VLLM_MAX_MODEL_LEN="$conservative_max_len"
+    fi
+
     local effective_plugin
     effective_plugin=$(resolve_plugin "$CURRENT_MODEL")
 
@@ -1499,13 +1511,6 @@ build_vllm_command() {
         --enable-auto-tool-choice
         --tool-call-parser qwen3_coder
     )
-
-    # Sanitize VLLM_MAX_MODEL_LEN against corruption
-    # Accept only: -1, auto, or a positive integer
-    if [[ "$VLLM_MAX_MODEL_LEN" != "-1" ]] && [[ "$VLLM_MAX_MODEL_LEN" != "auto" ]] && ! [[ "$VLLM_MAX_MODEL_LEN" =~ ^[1-9][0-9]*$ ]]; then
-        echo "WARNING: invalid VLLM_MAX_MODEL_LEN='$VLLM_MAX_MODEL_LEN', resetting to -1" >&2
-        VLLM_MAX_MODEL_LEN="-1"
-    fi
 
     if [ "$effective_plugin" = "Mirai S" ]; then
         local plugin_dir
