@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh — PMM 3.4.0 Bootstrap Installer
+# install.sh — PMM 3.5.1 Bootstrap Installer
 #
 # Two installation modes:
 #
@@ -25,7 +25,7 @@ CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/prism-model-manager"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/prism-model-manager"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 BACKENDS_DIR="$DATA_HOME/prism-model-manager/backends"
-VERSION="3.4.0"
+VERSION="3.5.1"
 
 OFFLINE_MODE=0
 for arg in "$@"; do

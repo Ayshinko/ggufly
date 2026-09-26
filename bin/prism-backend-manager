@@ -28,10 +28,36 @@ MIRAI_PLUGIN_DIR="$BACKENDS_DIR/mirai_s"
 DOWNLOAD_CACHE="$STATE_DIR/downloads"
 PLUGIN_DL_CACHE="$STATE_DIR/plugin-downloads"
 
-# ── Model-local plugin directory computation ───
+# ── PMM managed plugin runtime directory ─────
+# Python plugins (e.g. Mirai S) are installed here, not inside model directories,
+# because model directories may live on filesystems (NTFS, exFAT, SMB, NAS)
+# that reject filenames ending in dots or other special characters.
+# Architecture: ~/.local/share/prism-model-manager/plugins/<name>/<version>/site-packages
+PMM_DATA_DIR="$DATA_HOME/prism-model-manager"
+PMM_PLUGIN_DIR="${PMM_PLUGIN_ROOT:-$PMM_DATA_DIR/plugins}"
+MIRAI_PLUGIN_ROOT="$PMM_PLUGIN_DIR/mirai-s"
+
+# Resolve the PMM-managed site-packages path for a given plugin version.
+#   pmm_plugin_site_pkgs <plugin_name> <version>
+# Example: ~/.local/share/prism-model-manager/plugins/mirai-s/0.2.1/site-packages
+pmm_plugin_site_pkgs() {
+    local name="$1" version="$2"
+    printf '%s/%s/%s/site-packages\n' "$PMM_PLUGIN_DIR" "$name" "$version"
+}
+
+# Resolve the PMM-managed plugin version directory (parent of site-packages).
+pmm_plugin_version_dir() {
+    local name="$1" version="$2"
+    printf '%s/%s/%s\n' "$PMM_PLUGIN_DIR" "$name" "$version"
+}
+
+# ── Model-local plugin directory computation (LEGACY/DEPRECATED) ───
 # Returns the path for a plugin inside a model's .pmm directory.
 #   model_plugin_dir <model_path> <plugin_name>
 # Example: /mnt/Storage/Model/qwen3.8-s/.pmm/plugins/mirai-s/
+#
+# DEPRECATED: New installs use pmm_plugin_site_pkgs() under PMM_PLUGIN_DIR.
+# This function is retained for legacy detection of old model-local installs.
 model_plugin_dir() {
     local model_path="$1" plugin_name="$2"
     # Resolve model to a directory
@@ -158,41 +184,110 @@ vllm_status() {
 }
 
 mirai_s_status() {
-    local check_model_dir="${1:-}" model_installed_at=""
+    local check_model_dir="${1:-}"
 
-    # 1. Check model-local plugin directory if provided
+    # 1. Check PMM-managed shared plugin tree (new architecture)
+    #    Walk available version dirs under MIRAI_PLUGIN_ROOT
+    if [ -d "$MIRAI_PLUGIN_ROOT" ]; then
+        for ver_dir in "$MIRAI_PLUGIN_ROOT"/*/; do
+            [ -d "$ver_dir" ] || continue
+            local candidate="${ver_dir}site-packages"
+            if _verify_at_site "$candidate" "PMM managed"; then
+                return 0
+            fi
+        done
+    fi
+
+    # 2. Check legacy model-local plugin directory (old .pmm installs)
     if [ -n "$check_model_dir" ]; then
         local local_dir
         local_dir=$(model_plugin_dir "$check_model_dir" "mirai-s")
+        if [ -d "$local_dir/site-packages" ]; then
+            if _verify_at_site "$local_dir/site-packages" "legacy model-local"; then
+                return 0
+            fi
+        fi
         if [ -f "$local_dir/installed.txt" ]; then
-            model_installed_at="$local_dir"
-            local ver
-            ver=$(cat "$local_dir/installed.txt")
-            echo "installed:$ver"
-            return 0
+            if _verify_at_site "$local_dir/site-packages" "legacy model-local" 2>/dev/null; then
+                return 0
+            fi
         fi
     fi
 
-    # 2. Check via vllm venv (works for both global and model-local installs)
-    local py="$VLLM_VENV/bin/python"
-    if [ -x "$py" ]; then
-        local ver
-        ver=$("$py" -c "import mirai_s; print(mirai_s.__version__)" 2>/dev/null || echo "unknown")
-        if [ "$ver" != "unknown" ]; then
-            echo "installed:$ver"
-            return 0
-        fi
-    fi
-
-    # 3. Check legacy global plugin directory
+    # 3. Check legacy global plugin directory (deprecated)
     if [ -f "$MIRAI_PLUGIN_DIR/installed.txt" ]; then
         local ver
         ver=$(cat "$MIRAI_PLUGIN_DIR/installed.txt")
-        echo "installed:$ver"
+        echo "installed:$ver (legacy global)"
         return 0
     fi
 
+    # 4. Fallback: check shared vLLM venv (old installs) using importlib.metadata
+    local py="$VLLM_VENV/bin/python"
+    if [ -x "$py" ]; then
+        local ver
+        ver=$("$py" -c "
+from importlib import metadata
+try:
+    print(metadata.version('mirai-s'))
+except Exception:
+    pass
+" 2>/dev/null || echo "")
+        if [ -n "$ver" ]; then
+            echo "installed:$ver (shared venv)"
+            return 0
+        fi
+    fi
+
     echo "not_installed"
+    return 1
+}
+
+# ── Shared verification helper (top-level, callable by any function) ──
+# Verify a plugin at a given site-packages path via import + distribution metadata.
+# Returns 0 with "installed:<version> (location)" on success.
+# The Python stderr is NOT suppressed so callers can log the real exception.
+_verify_at_site() {
+    local site_pkgs="$1" label="${2:-PMM managed}"
+    local py="$VLLM_VENV/bin/python"
+    if [ -d "$site_pkgs" ] && [ -x "$py" ]; then
+        local result
+        result=$(PYTHONPATH="$site_pkgs${PYTHONPATH:+:$PYTHONPATH}" \
+            "$py" -c "
+import sys
+from importlib import metadata
+import os
+site = '$site_pkgs'
+try:
+    import mirai_s
+except ImportError as e:
+    print(f'IMPORT ERROR: {e}', file=sys.stderr)
+    sys.exit(1)
+mod_path = os.path.realpath(mirai_s.__file__)
+expected_dir = os.path.realpath(site)
+if not mod_path.startswith(expected_dir + '/') and not mod_path.startswith(expected_dir):
+    print(f'LOCATION ERROR: {mod_path} not under {expected_dir}', file=sys.stderr)
+    sys.exit(1)
+matches = []
+for dist in metadata.distributions(path=[site]):
+    name = (dist.metadata.get('Name') or '').lower().replace('_', '-')
+    if name == 'mirai-s':
+        matches.append(dist.version)
+if not matches:
+    print(f'METADATA ERROR: no mirai-s distribution found in {site}', file=sys.stderr)
+    sys.exit(1)
+print(matches[0])
+" 2>&1) || {
+            local rc=$?
+            debug "  _verify_at_site: Python verification failed (rc=$rc)"
+            debug "  stderr: $(echo "$result" | tail -3)"
+            return 1
+        }
+        if [ -n "$result" ] && echo "$result" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "installed:$result ($label)"
+            return 0
+        fi
+    fi
     return 1
 }
 
@@ -274,8 +369,6 @@ install_llamacpp() {
     # 1. Check for Prism fork backend on this system
     local local_prism_backend
     for candidate in \
-        "$HOME/AI-Workspace/prism-llama/build-cuda/bin/llama-server" \
-        "$HOME/AI-Workspace/bonsai-kernel-test/build-cuda-pr218/bin/llama-server" \
         "$HOME/.local/lib/prism-llama/llama-server" \
         "$DATA_HOME/prism-llama/build-cuda/bin/llama-server" \
         ; do
@@ -550,10 +643,88 @@ remove_vllm() {
     fi
 }
 
+# ── Mirai payload validation ─────────────────
+
+# Strict validation of a Mirai NVIDIA/vLLM checkpoint.
+# Returns 0 only if the complete payload is present.
+# Checks trellis.mirai, model.safetensors.index.json, all weight_map shards,
+# config.json, and at least one Mirai wheel.
+validate_mirai_payload() {
+    local vllm_dir="$1"
+    [ -d "$vllm_dir" ] || return 1
+    [ -f "$vllm_dir/config.json" ] || return 1
+    [ -f "$vllm_dir/trellis.mirai" ] || return 1
+    [ -s "$vllm_dir/trellis.mirai" ] || return 1
+    [ -f "$vllm_dir/model.safetensors.index.json" ] || return 1
+    [ -s "$vllm_dir/model.safetensors.index.json" ] || return 1
+    # Check at least one Mirai wheel exists
+    ls "$vllm_dir/mirai_s-"*.whl 2>/dev/null | grep -q . || return 1
+
+    # Parse weight_map and verify every referenced shard
+    python3 -c "
+import json, os, sys
+index_file = '$vllm_dir/model.safetensors.index.json'
+vllm_dir = '$vllm_dir'
+try:
+    with open(index_file) as f:
+        index = json.load(f)
+    weight_map = index.get('weight_map', {})
+    if not weight_map:
+        print('ERROR: weight_map is empty in model.safetensors.index.json')
+        sys.exit(1)
+    referenced = set(weight_map.values())
+    for shard in referenced:
+        shard_path = os.path.join(vllm_dir, shard)
+        if not os.path.isfile(shard_path):
+            print(f'ERROR: Missing shard: {shard}')
+            sys.exit(1)
+        if os.path.getsize(shard_path) == 0:
+            print(f'ERROR: Empty shard: {shard}')
+            sys.exit(1)
+    print(f'OK: {len(referenced)} shard files verified')
+except json.JSONDecodeError as e:
+    print(f'ERROR: Invalid index JSON: {e}')
+    sys.exit(1)
+except Exception as e:
+    print(f'ERROR: {e}')
+    sys.exit(1)
+" 2>/dev/null || return 1
+    return 0
+}
+
+# Select the best Mirai plugin wheel from a vllm directory.
+# Priority:
+#   1. Version explicitly declared in the model README.md (if available)
+#   2. Highest semantic version among all available wheels
+select_mirai_wheel() {
+    local vllm_dir="$1"
+    local wheels
+    # Use Python for robust semver sorting
+    python3 -c "
+import os, re, sys
+vllm_dir = '$vllm_dir'
+wheels = []
+for f in os.listdir(vllm_dir):
+    m = re.match(r'mirai_s-(\d+\.\d+\.\d+)-py3-none-any\.whl', f)
+    if m:
+        ver = tuple(int(x) for x in m.group(1).split('.'))
+        wheels.append((ver, f))
+if not wheels:
+    sys.exit(1)
+# Sort by version descending
+wheels.sort(key=lambda x: x[0], reverse=True)
+print(wheels[0][1])
+" 2>/dev/null || {
+        # Fallback: descending lexical sort
+        find "$vllm_dir" -name 'mirai_s-*.whl' -type f | sort -r | head -1
+        return
+    }
+}
+
 # ── Mirai S plugin installer ─────────────────
 
 install_mirai_s() {
-    local target_model_dir="${1:-}"
+    local target_model_dir="${1:-}" explicit_plugin_dir="${2:-}"
     log "=== Installing Mirai S plugin ==="
 
     # 1. vLLM must be installed first
@@ -563,195 +734,414 @@ install_mirai_s() {
         return 1
     fi
 
-    # 2. Check GPU compatibility
+    # 2. Resolve the model package root
+    local model_pkg_dir=""
+    if [ -n "$target_model_dir" ]; then
+        model_pkg_dir="$target_model_dir"
+    else
+        log "ERROR: A model directory is required for Mirai S plugin installation."
+        log "Usage: prism-backend-manager install mirai_s <model-directory>"
+        return 1
+    fi
+    if [ ! -d "$model_pkg_dir" ]; then
+        log "ERROR: Model directory does not exist: $model_pkg_dir"
+        return 1
+    fi
+
+    local vllm_dir="$model_pkg_dir/vllm"
+
+    # 3. Check GPU compatibility
     local vram compute_cap
     vram=$(detect_key "vram_per_gpu_mib")
     compute_cap=$(detect_key "compute_capability")
-
-    if [ -n "$vram" ] && [ "$vram" -lt 12288 ]; then
-        log "WARNING: GPU VRAM ($vram MiB) < 12 GiB."
-        log "Mirai S requires 8.2 GiB + context. A 12 GB card is the minimum."
-        log "Installation will continue but you may need to reduce context size."
-    fi
-
-    # 3. Download the plugin wheel and model from HuggingFace
-    log ""
-    log "The Mirai S plugin is hosted on HuggingFace:"
-    log "  https://huggingface.co/trymirai/Qwen3.8-27B-S-experimental"
-    log ""
-    log "This will download approximately 9.3 GB (model + plugin)."
-    log ""
-
-    if command -v gum >/dev/null 2>&1; then
-        if ! gum confirm "Download Mirai S model and plugin (9.3 GB)?"; then
-            log "Installation cancelled."
-            return 1
+    if [ -n "$vram" ] && [ "$vram" -ne 0 ]; then
+        local vram_ok
+        vram_ok=$(python3 -c "
+v = int('$vram')
+print('yes' if v >= 12000 else 'no')
+" 2>/dev/null || echo "yes")
+        if [ "$vram_ok" != "yes" ]; then
+            log "WARNING: GPU VRAM ($vram MiB) is below typical 12GB-class GPUs."
+            log "Mirai S requires ~8.2 GiB + context. Installation will continue."
         fi
+    fi
+
+    # 4. Check if the NVIDIA/vLLM model variant is already present
+    if validate_mirai_payload "$vllm_dir"; then
+        log "NVIDIA/vLLM model variant found and validated: $vllm_dir"
+        log "Skipping download."
     else
-        log "Press Enter to continue with download, or Ctrl-C to cancel."
-        read -r || return 1
-    fi
+        log ""
+        log "This Mirai model requires a separate NVIDIA/vLLM-ready checkpoint (~9.3 GB)."
+        log "Your existing top-level model files will be kept."
+        log ""
+        log "HuggingFace repo: trymirai/Qwen3.8-27B-S-experimental"
+        log ""
 
-    # Check disk space
-    local disk_free disk_total
-    disk_free=$(detect_key "disk_home_free_gib")
-    disk_total=$(detect_key "disk_home_total_gib")
-    if [ -n "$disk_free" ] && [ "$disk_free" -lt 12 ]; then
-        log "ERROR: Insufficient disk space. Only $disk_free GiB free, need 12+ GiB."
-        return 1
-    fi
-
-    # 4. Determine installation target
-    mkdir -p "$PLUGIN_DL_CACHE"
-
-    # If user provided a model directory, install plugin there
-    local local_plugin_dir=""
-    if [ -n "$target_model_dir" ]; then
-        local_plugin_dir=$(model_plugin_dir "$target_model_dir" "mirai-s")
-        mkdir -p "$(dirname "$local_plugin_dir")"
-        log "Plugin target: $local_plugin_dir"
-    fi
-
-    # Download the model and plugin (cached in download cache)
-    local model_dir
-    if [ -n "$target_model_dir" ]; then
-        # Use the provided model directory directly
-        model_dir="$target_model_dir"
-        if [ ! -f "$model_dir/config.json" ]; then
-            log "ERROR: Provided model directory $model_dir does not contain config.json"
-            return 1
-        fi
-    else
-        model_dir="$MODEL_ROOT/Qwen3.8-27B-S-experimental"
-        # ... existing download logic ...
-        if [ -d "$model_dir" ]; then
-            log "Model directory already exists: $model_dir"
-            log "Skipping download. Remove it first to re-download."
+        if command -v gum >/dev/null 2>&1; then
+            if ! gum confirm "Download the NVIDIA/vLLM model variant (9.3 GB)?"; then
+                log "Download cancelled."
+                return 1
+            fi
         else
-            # Try huggingface_hub first
-            if "$VLLM_VENV/bin/pip" install huggingface_hub 2>&1 | tail -1; then
-                log "Downloading model via huggingface_hub..."
-                "$VLLM_VENV/bin/python" -c "
-from huggingface_hub import snapshot_download
-snapshot_download(
-    repo_id='trymirai/Qwen3.8-27B-S-experimental',
-    local_dir='$model_dir',
-    local_dir_use_symlinks=False,
-    resume_download=True,
-    ignore_patterns=['uzu/*'],  # Skip Apple Silicon runtime
-)
-" 2>&1 || {
-                    log "WARNING: huggingface_hub download failed. Trying git approach..."
-                    rm -rf "$model_dir" 2>/dev/null || true
-                }
-            fi
+            log "Press Enter to download, or Ctrl-C to cancel."
+            read -r || return 1
+        fi
 
-            # Fallback to git lfs
-            if [ ! -d "$model_dir" ] || [ ! -f "$model_dir/config.json" ]; then
-                log "Downloading via git LFS..."
-                if command -v git >/dev/null 2>&1; then
-                    GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 \
-                        https://huggingface.co/trymirai/Qwen3.8-27B-S-experimental \
-                        "$model_dir" 2>&1 || {
-                        log "ERROR: Git clone failed"
-                        rm -rf "$model_dir" 2>/dev/null || true
+        # ── Target filesystem disk check ──
+        log "Checking disk space on target filesystem..."
+        local disk_check_ok
+        disk_check_ok=$(python3 -c "
+import json, os, shutil, sys
+path = '$model_pkg_dir'
+while not os.path.isdir(path) and path != '/':
+    path = os.path.dirname(path)
+try:
+    usage = shutil.disk_usage(path)
+    free_gib = usage.free / (1024**3)
+    if 0 < free_gib < 12:
+        print(f'LOW:{round(free_gib, 1)}')
+    else:
+        print(f'OK:{round(free_gib, 1)}')
+except OSError as e:
+    print(f'ERR:{e}')
+" 2>/dev/null || echo "ERR:disk check failed")
+        case "$disk_check_ok" in
+            LOW:*)
+                local free="${disk_check_ok#LOW:}"
+                log "WARNING: Only ${free} GiB free on target filesystem."
+                log "Need approximately 12 GiB for the checkpoint."
+                if command -v gum >/dev/null 2>&1; then
+                    if ! gum confirm "Continue with limited disk space?"; then
+                        log "Download cancelled."
                         return 1
-                    }
-                    cd "$model_dir"
-                    git lfs pull --include "vllm/*" 2>&1 || true
-                    cd "$OLDPWD" || true
+                    fi
                 else
-                    log "ERROR: Need git or huggingface_hub to download model."
-                    return 1
+                    log "Press Enter to continue, or Ctrl-C to cancel."
+                    read -r || return 1
                 fi
+                ;;
+            ERR:*)
+                local err="${disk_check_ok#ERR:}"
+                log "WARNING: Could not check disk space: $err"
+                log "Proceeding without verification."
+                ;;
+            OK:*)
+                local free="${disk_check_ok#OK:}"
+                log "  Free space on target filesystem: ${free} GiB"
+                ;;
+        esac
+
+        # ── Download the NVIDIA/vLLM model variant ──
+        local downloader=""
+        if [ -x "$VLLM_VENV/bin/hf" ]; then
+            downloader="$VLLM_VENV/bin/hf"
+        elif [ -x "$VLLM_VENV/bin/python" ]; then
+            if "$VLLM_VENV/bin/python" -c "import huggingface_hub" 2>/dev/null; then
+                downloader="python_hub:$VLLM_VENV/bin/python"
             fi
+        fi
+        if [ -z "$downloader" ]; then
+            if command -v hf >/dev/null 2>&1; then
+                downloader="hf"
+            elif command -v huggingface-cli >/dev/null 2>&1; then
+                downloader="huggingface-cli"
+            elif python3 -c "import huggingface_hub" 2>/dev/null; then
+                downloader="python_system_hub"
+            fi
+        fi
+
+        if [ -z "$downloader" ]; then
+            log "ERROR: No usable Hugging Face downloader was found."
+            log "Checked: managed vLLM hf, Python huggingface_hub, system hf, huggingface-cli"
+            log "Install: prism-backend-manager install vllm (includes huggingface_hub)"
+            return 1
+        fi
+
+        local download_ok=0
+        mkdir -p "$vllm_dir"
+
+        case "$downloader" in
+            *"/bin/hf")
+                log "Downloading via managed hf ($downloader)..."
+                log "  Command: hf download trymirai/Qwen3.8-27B-S-experimental"
+                log "         :   --include 'vllm/*' --include 'speedcheck.py'"
+                log "         :   --local-dir '$model_pkg_dir'"
+                if "$downloader" download trymirai/Qwen3.8-27B-S-experimental \
+                    --include "vllm/*" --include "speedcheck.py" \
+                    --local-dir "$model_pkg_dir" 2>&1; then
+                    download_ok=1
+                else
+                    log "WARNING: hf download failed (stderr above)."
+                fi
+                ;;
+            "python_hub:"*)
+                local hub_py="${downloader#python_hub:}"
+                log "Downloading via managed Python + huggingface_hub ($hub_py)..."
+                if "$hub_py" -c "
+import sys
+from huggingface_hub import snapshot_download
+try:
+    snapshot_download(
+        repo_id='trymirai/Qwen3.8-27B-S-experimental',
+        local_dir='$model_pkg_dir',
+        allow_patterns=['vllm/*', 'speedcheck.py'],
+        ignore_patterns=['uzu/*'],
+    )
+except Exception as e:
+    print(f'Download failed: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1; then
+                    download_ok=1
+                else
+                    log "WARNING: huggingface_hub download failed."
+                fi
+                ;;
+            "hf")
+                log "Downloading via system hf..."
+                if hf download trymirai/Qwen3.8-27B-S-experimental \
+                    --include "vllm/*" --include "speedcheck.py" \
+                    --local-dir "$model_pkg_dir" 2>&1; then
+                    download_ok=1
+                fi
+                ;;
+            "huggingface-cli")
+                log "Downloading via huggingface-cli..."
+                if huggingface-cli download trymirai/Qwen3.8-27B-S-experimental \
+                    --include "vllm/*" --include "speedcheck.py" \
+                    --local-dir "$model_pkg_dir" 2>&1; then
+                    download_ok=1
+                fi
+                ;;
+            "python_system_hub")
+                log "Downloading via system Python + huggingface_hub..."
+                if python3 -c "
+import sys
+from huggingface_hub import snapshot_download
+try:
+    snapshot_download(
+        repo_id='trymirai/Qwen3.8-27B-S-experimental',
+        local_dir='$model_pkg_dir',
+        allow_patterns=['vllm/*', 'speedcheck.py'],
+        ignore_patterns=['uzu/*'],
+    )
+except Exception as e:
+    print(f'Download failed: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1; then
+                    download_ok=1
+                fi
+                ;;
+        esac
+
+        if [ "$download_ok" -eq 1 ]; then
+            log "Download completed. Validating payload..."
+            if validate_mirai_payload "$vllm_dir"; then
+                log "NVIDIA/vLLM model variant validated successfully."
+            else
+                log "WARNING: Download completed but payload validation failed."
+                log "Some files may be missing or incomplete."
+                log "Run the installation again to retry."
+                return 1
+            fi
+        else
+            log "ERROR: NVIDIA/vLLM model variant download failed."
+            log "Check network connectivity and Hugging Face access."
+            return 1
         fi
     fi
 
-    # Verify download
-    if [ ! -f "$model_dir/config.json" ]; then
-        log "ERROR: Download incomplete — config.json not found at $model_dir"
-        return 1
-    fi
+    # 5. Select and install the plugin wheel
+    log "Selecting Mirai S plugin wheel..."
 
-    # 5. Install the plugin wheel
-    log "Installing Mirai S plugin wheel..."
-
-    local wheel_path
-    wheel_path=$(find "$model_dir/vllm" -name "mirai_s-*.whl" -type f 2>/dev/null | head -1)
-    if [ -z "$wheel_path" ]; then
-        log "ERROR: Plugin wheel not found in $model_dir/vllm/"
-        return 1
-    fi
-
-    # Cache the wheel
-    cp "$wheel_path" "$PLUGIN_DL_CACHE/"
-    log "  Cached wheel: $PLUGIN_DL_CACHE/$(basename "$wheel_path")"
-
-    # Install into vLLM venv (required for import)
-    "$VLLM_VENV/bin/pip" install "$wheel_path" 2>&1 | tail -5 || {
-        log "ERROR: Plugin wheel installation failed."
+    local wheel_name
+    wheel_name=$(select_mirai_wheel "$vllm_dir") || {
+        log "ERROR: No Mirai plugin wheel found in $vllm_dir/"
+        log "Expected: mirai_s-*.whl"
         return 1
     }
+    local wheel_path="$vllm_dir/$wheel_name"
+    log "  Selected wheel: $wheel_name"
 
-    # 6. Verify installation
+    # Cache the wheel
+    mkdir -p "$PLUGIN_DL_CACHE"
+    cp "$wheel_path" "$PLUGIN_DL_CACHE/"
+    log "  Cached wheel: $PLUGIN_DL_CACHE/$wheel_name"
+
+    # 6. Extract version from wheel filename for PMM-managed versioned plugin dir
+    local mirai_version
+    mirai_version=$(python3 -c "
+import re
+m = re.match(r'mirai_s-(\d+\.\d+\.\d+)-py3-none-any\.whl', '$wheel_name')
+print(m.group(1) if m else '0.2.1')
+" 2>/dev/null || echo "0.2.1")
+    log "  Plugin version: $mirai_version"
+
+    # 7. Determine target: PMM-managed shared plugin directory
+    #    Do NOT install under the model directory — model dir may reside on
+    #    filesystems (NTFS, exFAT, SMB, NAS) that reject trailing-dot filenames.
+    local version_dir
+    version_dir=$(pmm_plugin_version_dir "mirai-s" "$mirai_version")
+    local site_pkgs="$version_dir/site-packages"
+    log "  Plugin runtime directory: $PMM_PLUGIN_DIR (PMM managed)"
+    log "  Installing to: $site_pkgs"
+
+    # 8. Check if this version is already validly installed — skip reinstall
+    if _verify_at_site "$site_pkgs" "PMM managed" 2>/dev/null; then
+        log "Mirai S $mirai_version is already installed at $site_pkgs"
+        log "Skipping reinstall."
+        return 0
+    fi
+
+    # 9. Atomic install: install into temp dir, verify, then replace
+    local temp_dir="${version_dir}.tmp.$$"
+    local temp_site_pkgs="$temp_dir/site-packages"
+    rm -rf "$temp_dir"
+    mkdir -p "$temp_site_pkgs"
+
+    log "  Installing to temporary location: $temp_site_pkgs"
+    local pip_output
+    pip_output=$("$VLLM_VENV/bin/python" -m pip install \
+        --no-deps \
+        --target="$temp_site_pkgs" \
+        "$wheel_path" 2>&1) || {
+        log "ERROR: Plugin wheel installation failed."
+        log "$pip_output"
+        rm -rf "$temp_dir"
+        return 1
+    }
+    log "  $pip_output"
+
+    # 10. Verify temporary install — capture full stderr for diagnosis
     local installed_ver=""
-    if "$VLLM_VENV/bin/python" -c "import mirai_s; print(mirai_s.__version__)" 2>/dev/null; then
-        installed_ver=$("$VLLM_VENV/bin/python" -c "import mirai_s; print(mirai_s.__version__)")
+    local verify_error
+    installed_ver=$(_verify_site_get_version "$temp_site_pkgs" 2>&1) || {
+        verify_error=$installed_ver
+        installed_ver=""
+    }
 
-        # Write marker to model-local directory
-        if [ -n "$local_plugin_dir" ]; then
-            mkdir -p "$local_plugin_dir"
-            echo "$installed_ver" > "$local_plugin_dir/installed.txt"
-            # Copy the wheel into the model-local dir for offline/reinstall
-            cp "$wheel_path" "$local_plugin_dir/"
-            log "  Model-local plugin dir: $local_plugin_dir"
+    if [ -z "$installed_ver" ]; then
+        log "ERROR: Plugin verification failed in temporary location."
+        log "Verification diagnostics:"
+        log "  Directory: $temp_site_pkgs"
+        log "  Python:    $VLLM_VENV/bin/python"
+        log "  stderr:"
+        if [ -n "$verify_error" ]; then
+            echo "$verify_error" | while IFS= read -r line; do log "    $line"; done
+        else
+            log "    (no diagnostics captured)"
         fi
-
-        # Also write legacy global marker
-        mkdir -p "$MIRAI_PLUGIN_DIR"
-        echo "$installed_ver" > "$MIRAI_PLUGIN_DIR/installed.txt"
-
-        log "Mirai S plugin $installed_ver installed successfully."
-    else
-        log "ERROR: Plugin verification failed."
+        log ""
+        log "  Directory contents:"
+        ls -la "$temp_site_pkgs" 2>/dev/null | head -20 | while IFS= read -r line; do log "    $line"; done
+        log ""
+        log "  dist-info dirs:"
+        ls -d "$temp_site_pkgs"/*.dist-info 2>/dev/null | while IFS= read -r line; do log "    $line"; done
+        rm -rf "$temp_dir"
         return 1
     fi
 
+    log "  Verification passed: mirai_s $installed_ver"
+
+    # 11. Atomic replace: only remove existing version AFTER successful verification
+    rm -rf "$version_dir"
+    mv "$temp_dir" "$version_dir"
+    log "  Installed at: $version_dir"
+
+    # 12. Write descriptive marker
+    cat > "$version_dir/installed.txt" <<MARKER
+plugin=mirai_s
+version=$installed_ver
+source_wheel=$wheel_name
+install_dir=$version_dir
+model_package=$model_pkg_dir
+MARKER
+    # Copy the wheel into the plugin version dir for offline/reinstall
+    cp "$wheel_path" "$version_dir/"
+    log "  Plugin version $installed_ver installed at: $version_dir"
+
+    log "Mirai S plugin $installed_ver installed successfully."
     log ""
     log "NOTE: The first vLLM start with Mirai S will compile CUDA kernels."
     log "This can take 5+ minutes. Subsequent starts will be faster."
 }
 
+# Helper: verify a site-packages path and return the version string, or empty on failure.
+_verify_site_get_version() {
+    local site_pkgs="$1"
+    local py="$VLLM_VENV/bin/python"
+    if [ -d "$site_pkgs" ] && [ -x "$py" ]; then
+        PYTHONPATH="$site_pkgs${PYTHONPATH:+:$PYTHONPATH}" \
+            "$py" -c "
+import sys
+from importlib import metadata
+import os
+site = '$site_pkgs'
+try:
+    import mirai_s
+except ImportError as e:
+    print(f'IMPORT ERROR: {e}', file=sys.stderr)
+    sys.exit(1)
+mod_path = os.path.realpath(mirai_s.__file__)
+expected_dir = os.path.realpath(site)
+if not mod_path.startswith(expected_dir + '/') and not mod_path.startswith(expected_dir):
+    print(f'LOCATION ERROR: {mod_path} not under {expected_dir}', file=sys.stderr)
+    sys.exit(1)
+matches = []
+for dist in metadata.distributions(path=[site]):
+    name = (dist.metadata.get('Name') or '').lower().replace('_', '-')
+    if name == 'mirai-s':
+        matches.append(dist.version)
+if not matches:
+    print(f'METADATA ERROR: no mirai-s distribution found in {site}', file=sys.stderr)
+    sys.exit(1)
+print(matches[0])
+" 2>&1 || return 1
+        return 0
+    fi
+    return 1
+}
+
 remove_mirai_s() {
-    local target_model_dir="${1:-}"
+    local target_model_dir="${1:-}" explicit_version="${2:-}"
     log "=== Removing Mirai S plugin ==="
 
-    # Remove from vLLM venv
-    if "$VLLM_VENV/bin/pip" show mirai_s >/dev/null 2>&1; then
-        "$VLLM_VENV/bin/pip" uninstall -y mirai_s 2>&1 | tail -3
-        log "Removed mirai_s package from vLLM venv."
+    if [ -n "$explicit_version" ]; then
+        local version_dir
+        version_dir=$(pmm_plugin_version_dir "mirai-s" "$explicit_version")
+        if [ -d "$version_dir" ]; then
+            rm -rf "$version_dir"
+            log "Removed PMM managed plugin: $version_dir"
+        else
+            log "PMM managed plugin version not found: $explicit_version"
+        fi
+        return 0
     fi
 
-    # Remove model-local directory if provided
+    # Remove any/all versions from PMM managed plugin tree
+    if [ -d "$MIRAI_PLUGIN_ROOT" ]; then
+        for ver_dir in "$MIRAI_PLUGIN_ROOT"/*/; do
+            [ -d "$ver_dir" ] || continue
+            rm -rf "$ver_dir"
+            log "Removed PMM managed plugin: $(basename "$ver_dir")"
+        done
+    fi
+
+    # Legacy: remove model-local plugin if present
     if [ -n "$target_model_dir" ]; then
         local local_dir
         local_dir=$(model_plugin_dir "$target_model_dir" "mirai-s")
         if [ -d "$local_dir" ]; then
             rm -rf "$local_dir"
-            log "Removed model-local plugin dir: $local_dir"
-        fi
-        # Clean up .pmm parent if empty
-        local pmm_parent
-        pmm_parent=$(dirname "$(dirname "$local_dir")")  # <model>/.pmm
-        if [ -d "$pmm_parent" ] && [ -z "$(ls -A "$pmm_parent" 2>/dev/null)" ]; then
-            rmdir "$pmm_parent" 2>/dev/null && log "Removed empty: $pmm_parent"
+            log "Removed legacy model-local plugin: $local_dir"
         fi
     fi
 
-    # Remove legacy global marker
-    rm -f "$MIRAI_PLUGIN_DIR/installed.txt"
-    log "Removed plugin markers."
+    # Legacy global removal
+    rm -f "$MIRAI_PLUGIN_DIR/installed.txt" 2>/dev/null || true
+    log "Removed legacy global plugin marker."
+
+    log "Mirai S plugin removed."
 }
 
 # ── Main dispatcher ──────────────────────────
@@ -794,8 +1184,7 @@ case "${1:-}" in
                 install_vllm
                 ;;
             mirai_s)
-                local model_dir="${3:-}"
-                install_mirai_s "$model_dir"
+                install_mirai_s "${3:-}" "${4:-}"
                 ;;
             *)
                 echo "Usage: prism-backend-manager install [llama.cpp|vllm|mirai_s]" >&2
@@ -811,7 +1200,7 @@ case "${1:-}" in
         case "${2:-}" in
             llama.cpp) remove_llamacpp ;;
             vllm) remove_vllm ;;
-            mirai_s) remove_mirai_s "${3:-}" ;;
+            mirai_s) remove_mirai_s "${3:-}" "${4:-}" ;;
             *)
                 echo "Usage: prism-backend-manager remove [llama.cpp|vllm|mirai_s]" >&2
                 exit 1

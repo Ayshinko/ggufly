@@ -21,7 +21,7 @@ without having to maintain long server commands manually.
   <img src="assets/prism-model-manager-showcase.png" width="100%" alt="Prism Model Manager">
 </p>
 
-Version **3.4.0**, licensed under the [MIT License](LICENSE).
+Version **3.5.1**, licensed under the [MIT License](LICENSE).
 
 Originally developed on **Omarchy / Arch Linux**. The launcher uses standard Linux
 command-line tools and does not depend on Hyprland or an Omarchy desktop session.
@@ -79,9 +79,9 @@ Download the latest PMM release:
 
 ```bash
 # Download and extract the standard bootstrap package (~60 KB)
-wget https://github.com/Ayshinko/prism-model-manager/releases/latest/download/prism-model-manager-3.4.0-linux-x86_64-standard.tar.gz
-tar xzf prism-model-manager-3.4.0-linux-x86_64-standard.tar.gz
-cd prism-model-manager-3.4.0-linux-x86_64-standard
+wget https://github.com/Ayshinko/prism-model-manager/releases/latest/download/prism-model-manager-3.5.1-linux-x86_64-standard.tar.gz
+tar xzf prism-model-manager-3.5.1-linux-x86_64-standard.tar.gz
+cd prism-model-manager-3.5.1-linux-x86_64-standard
 
 # Install PMM scripts only
 ./install.sh
@@ -100,9 +100,9 @@ For systems without internet access at install time:
 
 ```bash
 # Download the offline package (~49 MB)
-wget https://github.com/Ayshinko/prism-model-manager/releases/latest/download/prism-model-manager-3.4.0-linux-x86_64-offline.tar.gz
-tar xzf prism-model-manager-3.4.0-linux-x86_64-offline.tar.gz
-cd prism-model-manager-3.4.0-linux-x86_64-offline
+wget https://github.com/Ayshinko/prism-model-manager/releases/latest/download/prism-model-manager-3.5.1-linux-x86_64-offline.tar.gz
+tar xzf prism-model-manager-3.5.1-linux-x86_64-offline.tar.gz
+cd prism-model-manager-3.5.1-linux-x86_64-offline
 
 # Install with bundled llama.cpp backend
 ./install.sh --offline

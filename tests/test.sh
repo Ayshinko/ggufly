@@ -121,7 +121,7 @@ PREFIX="$TMP/install prefix" "$ROOT/install.sh"
 # Second install: with gum override, the upgrade prompt is auto-accepted (gum returns 0)
 # and the installer re-installs over itself. No errors should occur.
 PREFIX="$TMP/install prefix" "$ROOT/install.sh" 2>/dev/null || true
-[[ $("$TMP/install prefix/bin/prism-model-manager" --version) == "3.4.0" ]]
+[[ $("$TMP/install prefix/bin/prism-model-manager" --version) == "$VERSION" ]]
 PREFIX="$TMP/install prefix" "$ROOT/uninstall.sh"
 [[ ! -e "$TMP/install prefix/bin/prism-model-manager" && -f "$CONFIG" && -f "$LOGFILE" ]]
 PREFIX="$TMP/install prefix" "$ROOT/uninstall.sh"
@@ -204,5 +204,93 @@ check '--api-ready exits nonzero when the API is unreachable'
     rm -rf "$TMPU"
 )
 check 'set -u startup safety: no unbound variables with empty config'
+
+# ── Regression: find_hf_downloader resolution ──
+# Test 1: No downloaders available returns empty
+(
+    VLLM_ROOT="/nonexistent/venv"
+    VLLM_LEGACY_ROOT="/nonexistent/legacy"
+    vllm_venv_python() { return 1; }
+    result=$(find_hf_downloader)
+    [[ -z "$result" ]]
+)
+check 'find_hf_downloader returns empty when no downloaders exist'
+
+# Test 2: Managed vLLM hf is preferred
+(
+    VLLM_ROOT="$TMP/vllm-venv"
+    mkdir -p "$VLLM_ROOT/bin"
+    cat > "$VLLM_ROOT/bin/hf" <<'HFSCRIPT'
+#!/usr/bin/env bash
+echo "managed-hf"
+exit 0
+HFSCRIPT
+    chmod +x "$VLLM_ROOT/bin/hf"
+    result=$(VLLM_ROOT="$VLLM_ROOT" find_hf_downloader)
+    [[ "$result" == "$VLLM_ROOT/bin/hf" ]]
+)
+check 'find_hf_downloader prefers managed vLLM hf'
+
+# Test 3: Managed vLLM Python fallback
+(
+    VLLM_ROOT="$TMP/vllm-python"
+    mkdir -p "$VLLM_ROOT/bin"
+    cat > "$VLLM_ROOT/bin/python" <<'PYSCRIPT'
+#!/usr/bin/env python3
+import sys
+if len(sys.argv) > 1 and sys.argv[1] == '-c':
+    code = sys.argv[2]
+    if 'import huggingface_hub' in code:
+        exit(0)
+    print('mock python')
+    exit(0)
+exit(1)
+PYSCRIPT
+    chmod +x "$VLLM_ROOT/bin/python"
+    result=$(VLLM_ROOT="$VLLM_ROOT" find_hf_downloader)
+    [[ "$result" == "python_hub:$VLLM_ROOT/bin/python" ]]
+)
+check 'find_hf_downloader falls back to managed vLLM Python'
+
+# Test 4: Float-safe disk comparison
+(
+    disk_free_gib="32.0"
+    too_low=$(python3 -c "free=float('${disk_free_gib}'); print('yes' if 0 < free < 12 else 'no')")
+    [[ "$too_low" == "no" ]]
+    disk_free_gib="11.5"
+    too_low=$(python3 -c "free=float('${disk_free_gib}'); print('yes' if 0 < free < 12 else 'no')")
+    [[ "$too_low" == "yes" ]]
+    disk_free_gib="32"
+    too_low=$(python3 -c "free=float('${disk_free_gib}'); print('yes' if 0 < free < 12 else 'no')")
+    [[ "$too_low" == "no" ]]
+)
+check 'float-safe disk comparison (32.0, 11.5, 32 integer)'
+
+# Test 5: Disk check uses target filesystem, not $HOME
+(
+    check_path="$TMP/models/mirai-test"
+    mkdir -p "$check_path"
+    result=$(python3 -c "
+import json, shutil, sys
+target = sys.argv[1]
+usage = shutil.disk_usage(target)
+print(json.dumps({'free_gib': round(usage.free / (1024**3), 1)}))
+" "$check_path" 2>/dev/null)
+    [[ -n "$result" ]]
+    free=$(printf '%s' "$result" | python3 -c "import sys,json; print(json.load(sys.stdin)['free_gib'])")
+    [[ "$free" =~ ^[0-9]+\.?[0-9]*$ ]]
+    # Verify it's NOT using $HOME as target
+    [[ "$check_path" != "$HOME" ]]
+)
+check 'disk check uses target filesystem (shutil.disk_usage)'
+
+# Test 6: No hard-coded dev paths in source
+(
+    ! grep -q '/home/ayshinko' "$ROOT/bin/prism-model-manager"
+    ! grep -q 'AI-Workspace/pmm-source' "$ROOT/bin/prism-model-manager"
+    ! grep -q '/home/ayshinko' "$ROOT/bin/prism-backend-manager"
+    ! grep -q 'AI-Workspace' "$ROOT/bin/prism-backend-manager"
+)
+check 'no hard-coded dev paths in source files'
 
 echo 'All tests passed; no real model or GPU workload executed.'

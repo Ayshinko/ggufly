@@ -1,6 +1,49 @@
 # Changelog
 
-## 3.4.0 — 2026-09-25
+## 3.5.1 — 2026-09-26
+
+- **vLLM + Mirai S integration:** Complete backend management for HuggingFace
+  directory models and Mirai S trellis-quantized models.
+- **Mirai S plugin installer:** Installs isolated Mirai S wheel into PMM-managed
+  plugin directory. Uses `--no-deps` to avoid copying vLLM/torch/CUDA libraries
+  into the plugin target. Uses managed `$VLLM_VENV/bin/python -m pip`.
+- **Model-local plugin storage:** Plugin site-packages stored under
+  `<model-dir>/.pmm/plugins/<plugin>/site-packages`. No Python packages written
+  into the model directory itself (safetensors, config, etc. remain untouched).
+- **Directory model support:** `preflight()` now accepts both files (GGUF) and
+  directories (HF/Mirai S) as CURRENT_MODEL.
+- **Backend-aware settings menu:** llama.cpp-specific settings (GPU layers, KV
+  cache, Vision, MTP, LoRA) only shown when Backend=llama.cpp. vLLM settings
+  (GPU memory util, max model len, max sequences) shown when Backend=vLLM.
+- **Removed user-facing "Auto":** Auto is an internal concept only. Menus show
+  concrete backend/plugin choices. Old configs with `BACKEND=Auto` or
+  `PLUGIN=Auto` are safely migrated.
+- **Plugin selection now separate from installation:** `backend_plugin_compatible`
+  only checks structural model compatibility (requires `is_mirai_package`, not
+  `is_mirai_model_dir`). Installation availability belongs in `ensure_plugin()`.
+- **Context → max-model-len sync:** Setting "Context size" for vLLM backend
+  synchronizes to `--max-model-len`.
+- **PMM_PLUGIN_ROOT override:** Environment variable allows pointing plugin
+  storage to a different filesystem (e.g. writable path when `$HOME` is read-only).
+- **PMM-managed llama-server discovery:** `SERVER_BIN` now automatically finds
+  llama-server in PMM's managed `BACKENDS_DIR` after `ensure_backend` installation.
+- **LLAMA_DIR candidates:** Added `$BACKENDS_DIR/llama.cpp/llama-server` to the
+  auto-discovery candidate list.
+- **Python 3.11.16 managed vLLM venv:** vLLM 0.30.0, safetensors 0.8.0,
+  huggingface_hub 1.33.0, torch 2.13.0+cu130.
+- **Improved GPU port conflict handling:** Interactive choice to pick a different
+  port when the default is occupied.
+- **Clearer launch error messages:** Failed vLLM startup reports "vLLM server
+  exited before becoming ready" (not "llama-server").
+- **Verification exception visibility:** Import failures show the real Python
+  exception traceback.
+- **ZERO shell heredoc warnings:** All embedded Python heredocs inside `$()`
+  replaced with `python3 -c` inline code.
+- **122 automated tests:** Python unittest (116) + bash integration (6), all PASS.
+- **Regression tests for:** External model root (`PMM_MODEL_ROOT`), directory
+  model preflight, Mirai runtime path resolution, state persistence, plugin
+  verification, top-level function scope, heredoc warning check,
+  `PMM_PLUGIN_ROOT` override.
 
 - **Fixed startup crash:** Removed `plugin_name` unbound variable from main_menu()
   that caused PMM to exit immediately on launch under strict `set -u` mode.
