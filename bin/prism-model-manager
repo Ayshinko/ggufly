@@ -1500,6 +1500,13 @@ build_vllm_command() {
         --tool-call-parser qwen3_coder
     )
 
+    # Sanitize VLLM_MAX_MODEL_LEN against corruption
+    # Accept only: -1, auto, or a positive integer
+    if [[ "$VLLM_MAX_MODEL_LEN" != "-1" ]] && [[ "$VLLM_MAX_MODEL_LEN" != "auto" ]] && ! [[ "$VLLM_MAX_MODEL_LEN" =~ ^[1-9][0-9]*$ ]]; then
+        echo "WARNING: invalid VLLM_MAX_MODEL_LEN='$VLLM_MAX_MODEL_LEN', resetting to -1" >&2
+        VLLM_MAX_MODEL_LEN="-1"
+    fi
+
     if [ "$effective_plugin" = "Mirai S" ]; then
         local plugin_dir
         plugin_dir=$(effective_plugin_dir "$CURRENT_MODEL" "Mirai S")
@@ -2442,9 +2449,14 @@ settings_menu() {
                 ;;
 
             "Max model len"*)
-                VLLM_MAX_MODEL_LEN=$(gum input \
+                if value=$(gum input \
                     --value="$VLLM_MAX_MODEL_LEN" \
-                    --placeholder "-1 = model max, or a specific token count")
+                    --placeholder="Use -1 for max, or enter a token count" 2>/dev/null); then
+                    # Accept ONLY -1 or positive integers
+                    if [[ "$value" == "-1" || "$value" =~ ^[1-9][0-9]*$ ]]; then
+                        VLLM_MAX_MODEL_LEN="$value"
+                    fi
+                fi
                 ;;
 
             "GPU layers"*)
@@ -2521,15 +2533,23 @@ iq4_nl
                 ;;
 
             "Reasoning budget"*)
-                REASONING_BUDGET=$(gum input \
+                if value=$(gum input \
                     --value="$REASONING_BUDGET" \
-                    --placeholder="-1 unlimited, 0 disabled, e.g. 4096")
+                    --placeholder="Use -1 for unlimited, 0 to disable, or a token budget" 2>/dev/null); then
+                    if [[ "$value" =~ ^-?[0-9]+$ ]]; then
+                        REASONING_BUDGET="$value"
+                    fi
+                fi
                 ;;
 
             "Max output tokens"*)
-                MAX_OUTPUT_TOKENS=$(gum input \
+                if value=$(gum input \
                     --value="$MAX_OUTPUT_TOKENS" \
-                    --placeholder="-1 = unlimited, or a positive token budget, e.g. 4096")
+                    --placeholder="Use -1 for unlimited, or a token budget" 2>/dev/null); then
+                    if [[ "$value" =~ ^-?[0-9]+$ ]]; then
+                        MAX_OUTPUT_TOKENS="$value"
+                    fi
+                fi
                 ;;
 
             "Vision"*)

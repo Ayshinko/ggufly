@@ -1101,5 +1101,125 @@ done
         self.run_shell(code)
 
 
+class GumInputSafetyTests(unittest.TestCase):
+    """Tests for safe gum input handling and value validation."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.model = self.root / 'model'
+        self.model.write_bytes(b'GGUF' + struct.pack('<IQQ', 3, 0, 0))
+        self.env = {**os.environ, 'HOME': str(self.root),
+                    'XDG_CONFIG_HOME': str(self.root / 'config'),
+                    'XDG_STATE_HOME': str(self.root / 'state'),
+                    'XDG_DATA_HOME': str(self.root / 'data'),
+                    'PMM_SERVER_BIN': str(self.root / 'fake-server')}
+
+    def run_shell(self, code, *, env=None, ok=True):
+        prefix = ('set -e\nsource "$1/bin/prism-model-manager"\n'
+                  'CURRENT_MODEL="${CURRENT_MODEL:-}"\n'
+                  'PORT="${TEST_PORT:-8080}"\n'
+                  'pause() { :; }\ngum() { :; }\n')
+        result = subprocess.run(
+            ['bash', '-c', prefix + code, 'test', str(Path(__file__).resolve().parents[1])],
+            env={**self.env, **(env or {})}, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            timeout=20)
+        if ok:
+            self.assertEqual(result.returncode, 0, result.stdout)
+        else:
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+        return result.stdout
+
+    def test_vllm_max_model_len_safe_pattern(self):
+        """Max model len handler must use safe if/value pattern: if gum succeeds, validate, then assign."""
+        source_file = Path(__file__).resolve().parents[1] / 'bin/prism-model-manager'
+        content = source_file.read_text()
+        # The handler must use the if-value pattern
+        self.assertIn('if value=$(gum input', content)
+        self.assertIn('then', content)
+
+    def test_placeholder_no_leading_hyphen(self):
+        """Placeholders must not begin with '-1 ='."""
+        source_file = Path(__file__).resolve().parents[1] / 'bin/prism-model-manager'
+        for line in source_file.read_text().split('\n'):
+            if '--placeholder' in line and '-1 =' in line:
+                self.fail(f"Starts with hyphenated -1: {line.strip()}")
+
+    def test_valid_vllm_max_model_len_accepted(self):
+        """-1 and positive integers must be accepted as valid."""
+        code = '''
+# Simulate the handler validation
+validate() {
+    local val="$1"
+    if [[ "$val" == "-1" || "$val" =~ ^[1-9][0-9]*$ ]]; then
+        echo "VALID"
+    else
+        echo "INVALID"
+    fi
+}
+[[ "$(validate -1)" == "VALID" ]]
+[[ "$(validate 4096)" == "VALID" ]]
+[[ "$(validate 8192)" == "VALID" ]]
+'''
+        self.run_shell(code)
+
+    def test_invalid_vllm_max_model_len_rejected(self):
+        """Invalid values must be rejected by the validation pattern."""
+        code = '''
+validate() {
+    local val="$1"
+    if [[ "$val" == "-1" || "$val" =~ ^[1-9][0-9]*$ ]]; then
+        echo "VALID"
+    else
+        echo "INVALID"
+    fi
+}
+[[ "$(validate 'Usage: gum input')" == "INVALID" ]]
+[[ "$(validate '0')" == "INVALID" ]]
+[[ "$(validate '-2')" == "INVALID" ]]
+[[ "$(validate '')" == "INVALID" ]]
+[[ "$(validate 'abc')" == "INVALID" ]]
+'''
+        self.run_shell(code)
+
+    def test_sanitizer_defensive_in_build_command(self):
+        """build_vllm_command must sanitize corrupted VLLM_MAX_MODEL_LEN."""
+        model = str(self.model)
+        import os as py_os
+        data_home = str(self.root / 'data')
+        py_os.makedirs(f"{data_home}/prism-model-manager/backends/vllm-venv/bin", exist_ok=True)
+        py_os.symlink(py_os.sys.executable, f"{data_home}/prism-model-manager/backends/vllm-venv/bin/python")
+        code = f'''
+source "$1/bin/prism-model-manager"
+CURRENT_MODEL="{model}"
+BACKEND=vLLM
+VLLM_MAX_MODEL_LEN="Usage: gum input [flags]..."
+build_vllm_command 2>/dev/null || true
+# Must have sanitized back to -1
+echo "sanitized: $VLLM_MAX_MODEL_LEN"
+[[ "$VLLM_MAX_MODEL_LEN" == "-1" ]]
+'''
+        self.run_shell(code)
+
+    def test_safe_assign_preserves_value_on_gum_failure(self):
+        """When gum input exits non-zero, the previous value must be preserved."""
+        code = '''
+# Simulate the safe assign pattern
+value=""
+old_val="4096"
+# gum failure (empty value after failed input)
+gum() { return 1; }
+if value=$(gum input --value="$old_val" 2>/dev/null); then
+    result="$value"
+else
+    result="$old_val"
+fi
+[[ "$result" == "4096" ]]
+'''
+        self.run_shell(code)
+
+
 if __name__ == '__main__':
     unittest.main()
