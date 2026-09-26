@@ -2444,7 +2444,7 @@ settings_menu() {
             "Max model len"*)
                 VLLM_MAX_MODEL_LEN=$(gum input \
                     --value="$VLLM_MAX_MODEL_LEN" \
-                    --placeholder "-1 = auto, or max sequence length")
+                    --placeholder "-1 = model max, or a specific token count")
                 ;;
 
             "GPU layers"*)
