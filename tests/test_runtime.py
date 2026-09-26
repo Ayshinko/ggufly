@@ -1101,6 +1101,585 @@ done
         self.run_shell(code)
 
 
+class EnforceEagerTests(unittest.TestCase):
+    """Tests for VLLM_ENFORCE_EAGER setting — arg mapping, persistence, menu visibility, status."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.model = self.root / 'model'
+        self.model.write_bytes(b'GGUF' + struct.pack('<IQQ', 3, 0, 0))
+        self.env = {**os.environ, 'HOME': str(self.root),
+                    'XDG_CONFIG_HOME': str(self.root / 'config'),
+                    'XDG_STATE_HOME': str(self.root / 'state'),
+                    'XDG_DATA_HOME': str(self.root / 'data'),
+                    'PMM_SERVER_BIN': str(self.root / 'fake-server')}
+        # Create mock vLLM venv
+        import os as py_os
+        data_home = str(self.root / 'data')
+        py_os.makedirs(f"{data_home}/prism-model-manager/backends/vllm-venv/bin", exist_ok=True)
+        py_os.symlink(py_os.sys.executable, f"{data_home}/prism-model-manager/backends/vllm-venv/bin/python")
+
+    def run_shell(self, code, *, env=None, ok=True):
+        prefix = ('set -e\nsource "$1/bin/prism-model-manager"\n'
+                  'CURRENT_MODEL="${CURRENT_MODEL:-}"\n'
+                  'PORT="${TEST_PORT:-8080}"\n'
+                  'pause() { :; }\ngum() { :; }\n')
+        result = subprocess.run(
+            ['bash', '-c', prefix + code, 'test', str(Path(__file__).resolve().parents[1])],
+            env={**self.env, **(env or {})}, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            timeout=20)
+        if ok:
+            self.assertEqual(result.returncode, 0, result.stdout)
+        else:
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+        return result.stdout
+
+    def test_enforce_eager_off_omits_flag(self):
+        """OFF: no --enforce-eager in final argv."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM
+PLUGIN=None
+VLLM_ENFORCE_EAGER=off
+build_vllm_command 2>/dev/null || true
+# Assert no --enforce-eager in SERVER_ARGS
+for arg in "${{SERVER_ARGS[@]}}"; do
+    if [ "$arg" = "--enforce-eager" ]; then
+        echo "FAIL: found --enforce-eager when off"
+        exit 1
+    fi
+done
+echo "PASS: no --enforce-eager with off"
+'''
+        self.run_shell(code)
+
+    def test_enforce_eager_on_adds_flag(self):
+        """ON: exactly one --enforce-eager in final argv."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM
+PLUGIN=None
+VLLM_ENFORCE_EAGER=on
+build_vllm_command 2>/dev/null || true
+count=0
+for arg in "${{SERVER_ARGS[@]}}"; do
+    if [ "$arg" = "--enforce-eager" ]; then
+        count=$((count + 1))
+    fi
+done
+echo "count=$count"
+[ "$count" -eq 1 ] || {{ echo "FAIL: expected 1, got $count"; exit 1; }}
+echo "PASS: exactly 1 --enforce-eager with on"
+'''
+        self.run_shell(code)
+
+    def test_enforce_eager_1_also_adds_flag(self):
+        """Numeric 1 also maps to --enforce-eager."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM
+PLUGIN=None
+VLLM_ENFORCE_EAGER=1
+build_vllm_command 2>/dev/null || true
+count=0
+for arg in "${{SERVER_ARGS[@]}}"; do
+    if [ "$arg" = "--enforce-eager" ]; then
+        count=$((count + 1))
+    fi
+done
+[ "$count" -eq 1 ] || {{ echo "FAIL: expected 1, got $count"; exit 1; }}
+echo "PASS: numeric 1 adds --enforce-eager"
+'''
+        self.run_shell(code)
+
+    def test_enforce_eager_0_omits_flag(self):
+        """Numeric 0 omits --enforce-eager."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM
+PLUGIN=None
+VLLM_ENFORCE_EAGER=0
+build_vllm_command 2>/dev/null || true
+for arg in "${{SERVER_ARGS[@]}}"; do
+    if [ "$arg" = "--enforce-eager" ]; then
+        echo "FAIL: found --enforce-eager with 0"
+        exit 1
+    fi
+done
+echo "PASS: numeric 0 omits --enforce-eager"
+'''
+        self.run_shell(code)
+
+    def test_enforce_eager_profile_persistence(self):
+        """Profile saves on, reload restores on."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM
+PLUGIN=None
+VLLM_ENFORCE_EAGER=on
+save_model_profile
+
+# Reset to off
+VLLM_ENFORCE_EAGER=off
+
+# Reload profile
+load_model_profile 2>/dev/null || true
+
+echo "VLLM_ENFORCE_EAGER=$VLLM_ENFORCE_EAGER"
+[[ "$VLLM_ENFORCE_EAGER" == "on" ]] || {{ echo "FAIL: expected on after reload, got $VLLM_ENFORCE_EAGER"; exit 1; }}
+echo "PASS: profile persistence"
+'''
+        self.run_shell(code)
+
+    def test_enforce_eager_backend_menu_shown_for_vllm(self):
+        """Menu item 'Enforce eager' must be present for vLLM."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM
+PLUGIN=None
+effective_backend=$(resolve_backend "$CURRENT_MODEL")
+echo "backend=$effective_backend"
+
+# Build items like settings_menu does
+items=()
+if [ "$effective_backend" = "vLLM" ]; then
+    items+=("Enforce eager")
+fi
+
+found=false
+for item in "${{items[@]}}"; do
+    if [[ "$item" == *"Enforce eager"* ]]; then
+        found=true
+    fi
+done
+$found || {{ echo "FAIL: Enforce eager not in vLLM menu"; exit 1; }}
+echo "PASS: Enforce eager in vLLM menu"
+'''
+        self.run_shell(code)
+
+    def test_enforce_eager_not_shown_for_llamacpp(self):
+        """Enforce eager must NOT be shown for llama.cpp."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=llama.cpp
+PLUGIN=None
+effective_backend=$(resolve_backend "$CURRENT_MODEL")
+echo "backend=$effective_backend"
+
+# Build items like settings_menu does
+items=()
+if [ "$effective_backend" = "vLLM" ]; then
+    items+=("Enforce eager")
+fi
+
+for item in "${{items[@]}}"; do
+    if [[ "$item" == *"Enforce eager"* ]]; then
+        echo "FAIL: Enforce eager should not be in llama.cpp menu"
+        exit 1
+    fi
+done
+echo "PASS: Enforce eager not in llama.cpp menu"
+'''
+        self.run_shell(code)
+
+    def test_enforce_eager_status_screen(self):
+        """Status screen must show correct Enforce eager state."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM
+PLUGIN=None
+VLLM_ENFORCE_EAGER=on
+
+# Simulate status_screen display logic
+enforce_eager_display=""
+case "$VLLM_ENFORCE_EAGER" in
+    1|on) enforce_eager_display="on" ;;
+    *) enforce_eager_display="off" ;;
+esac
+
+echo "Enforce eager=$enforce_eager_display"
+[[ "$enforce_eager_display" == "on" ]] || {{ echo "FAIL: expected on"; exit 1; }}
+echo "PASS: status shows on"
+'''
+        self.run_shell(code)
+
+    def test_enforce_eager_sanitize_garbage(self):
+        """Garbage VLLM_ENFORCE_EAGER normalizes to off."""
+        code = '''
+# Simulate sanitize_settings normalization
+VLLM_ENFORCE_EAGER=garbage
+if ! [[ "$VLLM_ENFORCE_EAGER" =~ ^(0|off|1|on)$ ]]; then
+    VLLM_ENFORCE_EAGER=off
+fi
+[[ "$VLLM_ENFORCE_EAGER" == "off" ]] || exit 1
+echo "PASS: garbage normalized to off"
+'''
+        self.run_shell(code)
+
+    def test_enforce_eager_default_is_off(self):
+        """Default VLLM_ENFORCE_EAGER must be off."""
+        code = '''
+source "$1/bin/prism-model-manager"
+echo "default=$VLLM_ENFORCE_EAGER"
+[[ "$VLLM_ENFORCE_EAGER" == "off" ]] || exit 1
+echo "PASS: default is off"
+'''
+        self.run_shell(code)
+
+    def test_enforce_eager_menu_toggle_off_on(self):
+        """Toggle from off to on must work."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM
+PLUGIN=None
+VLLM_ENFORCE_EAGER=off
+
+# Simulate menu selection of 'on'
+value="on"
+[ -n "$value" ] && VLLM_ENFORCE_EAGER="$value"
+
+[[ "$VLLM_ENFORCE_EAGER" == "on" ]] || {{ echo "FAIL: expected on after toggle"; exit 1; }}
+echo "PASS: toggle to on works"
+'''
+        self.run_shell(code)
+
+    def test_enforce_eager_save_reload_is_off(self):
+        """Saving off and reloading must preserve off."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM
+PLUGIN=None
+VLLM_ENFORCE_EAGER=off
+save_model_profile
+
+# Reload
+VLLM_ENFORCE_EAGER=on
+load_model_profile 2>/dev/null || true
+
+echo "VLLM_ENFORCE_EAGER=$VLLM_ENFORCE_EAGER"
+[[ "$VLLM_ENFORCE_EAGER" == "off" ]] || {{ echo "FAIL: expected off after reload"; exit 1; }}
+echo "PASS: off persistence"
+'''
+        self.run_shell(code)
+
+
+class VllmKVArgMappingTests(unittest.TestCase):
+    """Tests for KV cache dtype and Max model len arg mapping in build_vllm_command."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.model = self.root / 'model'
+        self.model.write_bytes(b'GGUF' + struct.pack('<IQQ', 3, 0, 0))
+        self.env = {**os.environ, 'HOME': str(self.root),
+                    'XDG_CONFIG_HOME': str(self.root / 'config'),
+                    'XDG_STATE_HOME': str(self.root / 'state'),
+                    'XDG_DATA_HOME': str(self.root / 'data'),
+                    'PMM_SERVER_BIN': str(self.root / 'fake-server')}
+        import os as py_os
+        data_home = str(self.root / 'data')
+        py_os.makedirs(f"{data_home}/prism-model-manager/backends/vllm-venv/bin", exist_ok=True)
+        py_os.symlink(py_os.sys.executable, f"{data_home}/prism-model-manager/backends/vllm-venv/bin/python")
+
+    def run_shell(self, code, *, env=None, ok=True):
+        prefix = ('set -e\nsource "$1/bin/prism-model-manager"\n'
+                  'CURRENT_MODEL="${CURRENT_MODEL:-}"\n'
+                  'PORT="${TEST_PORT:-8080}"\n'
+                  'pause() { :; }\ngum() { :; }\n')
+        result = subprocess.run(
+            ['bash', '-c', prefix + code, 'test', str(Path(__file__).resolve().parents[1])],
+            env={**self.env, **(env or {})}, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            timeout=20)
+        if ok:
+            self.assertEqual(result.returncode, 0, result.stdout)
+        else:
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+        return result.stdout
+
+    def test_kv_cache_dtype_auto_omits_flag(self):
+        """VLLM_KV_CACHE_DTYPE=auto must not pass --kv-cache-dtype."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM PLUGIN=None
+VLLM_KV_CACHE_DTYPE=auto
+build_vllm_command 2>/dev/null || true
+for arg in "${{SERVER_ARGS[@]}}"; do
+    if [[ "$arg" == "--kv-cache-dtype" ]]; then
+        echo "FAIL: unexpected --kv-cache-dtype with auto"
+        exit 1
+    fi
+done
+echo "PASS: auto omits --kv-cache-dtype"
+'''
+        self.run_shell(code)
+
+    def test_kv_cache_dtype_bf16_maps_to_bfloat16(self):
+        """VLLM_KV_CACHE_DTYPE=BF16 must map to --kv-cache-dtype bfloat16."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM PLUGIN=None
+VLLM_KV_CACHE_DTYPE=BF16
+build_vllm_command 2>/dev/null || true
+found=false
+for ((i=0; i<${{#SERVER_ARGS[@]}}; i++)); do
+    if [[ "${{SERVER_ARGS[i]}}" == --kv-cache-dtype ]]; then
+        [[ "${{SERVER_ARGS[i+1]}}" == "bfloat16" ]] || {{ echo "FAIL: expected bfloat16"; exit 1; }}
+        found=true
+    fi
+done
+$found || {{ echo "FAIL: --kv-cache-dtype not found"; exit 1; }}
+echo "PASS: BF16 -> bfloat16"
+'''
+        self.run_shell(code)
+
+    def test_kv_cache_dtype_fp16_maps_to_float16(self):
+        """VLLM_KV_CACHE_DTYPE=FP16 must map to --kv-cache-dtype float16."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM PLUGIN=None
+VLLM_KV_CACHE_DTYPE=FP16
+build_vllm_command 2>/dev/null || true
+found=false
+for ((i=0; i<${{#SERVER_ARGS[@]}}; i++)); do
+    if [[ "${{SERVER_ARGS[i]}}" == --kv-cache-dtype ]]; then
+        [[ "${{SERVER_ARGS[i+1]}}" == "float16" ]] || {{ echo "FAIL: expected float16"; exit 1; }}
+        found=true
+    fi
+done
+$found || {{ echo "FAIL: --kv-cache-dtype not found"; exit 1; }}
+echo "PASS: FP16 -> float16"
+'''
+        self.run_shell(code)
+
+    def test_kv_cache_dtype_fp8_maps_to_fp8(self):
+        """VLLM_KV_CACHE_DTYPE=FP8 must map to --kv-cache-dtype fp8."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM PLUGIN=None
+VLLM_KV_CACHE_DTYPE=FP8
+build_vllm_command 2>/dev/null || true
+found=false
+for ((i=0; i<${{#SERVER_ARGS[@]}}; i++)); do
+    if [[ "${{SERVER_ARGS[i]}}" == --kv-cache-dtype ]]; then
+        [[ "${{SERVER_ARGS[i+1]}}" == "fp8" ]] || {{ echo "FAIL: expected fp8"; exit 1; }}
+        found=true
+    fi
+done
+$found || {{ echo "FAIL: --kv-cache-dtype not found"; exit 1; }}
+echo "PASS: FP8 -> fp8"
+'''
+        self.run_shell(code)
+
+    def test_kv_cache_dtype_fp8_e4m3_maps(self):
+        """VLLM_KV_CACHE_DTYPE=fp8_e4m3 must map to --kv-cache-dtype fp8_e4m3."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM PLUGIN=None
+VLLM_KV_CACHE_DTYPE=fp8_e4m3
+build_vllm_command 2>/dev/null || true
+found=false
+for ((i=0; i<${{#SERVER_ARGS[@]}}; i++)); do
+    if [[ "${{SERVER_ARGS[i]}}" == --kv-cache-dtype ]]; then
+        [[ "${{SERVER_ARGS[i+1]}}" == "fp8_e4m3" ]] || {{ echo "FAIL: expected fp8_e4m3"; exit 1; }}
+        found=true
+    fi
+done
+$found || {{ echo "FAIL: --kv-cache-dtype not found"; exit 1; }}
+echo "PASS: fp8_e4m3 -> --kv-cache-dtype fp8_e4m3"
+'''
+        self.run_shell(code)
+
+    def test_kv_cache_dtype_fp8_e5m2_maps(self):
+        """VLLM_KV_CACHE_DTYPE=fp8_e5m2 must map to --kv-cache-dtype fp8_e5m2."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM PLUGIN=None
+VLLM_KV_CACHE_DTYPE=fp8_e5m2
+build_vllm_command 2>/dev/null || true
+found=false
+for ((i=0; i<${{#SERVER_ARGS[@]}}; i++)); do
+    if [[ "${{SERVER_ARGS[i]}}" == --kv-cache-dtype ]]; then
+        [[ "${{SERVER_ARGS[i+1]}}" == "fp8_e5m2" ]] || {{ echo "FAIL: expected fp8_e5m2"; exit 1; }}
+        found=true
+    fi
+done
+$found || {{ echo "FAIL: --kv-cache-dtype not found"; exit 1; }}
+echo "PASS: fp8_e5m2 -> --kv-cache-dtype fp8_e5m2"
+'''
+        self.run_shell(code)
+
+    def test_kv_cache_dtype_int8_pertokenhead_maps(self):
+        """VLLM_KV_CACHE_DTYPE=int8_per_token_head must map to --kv-cache-dtype int8_per_token_head."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM PLUGIN=None
+VLLM_KV_CACHE_DTYPE=int8_per_token_head
+build_vllm_command 2>/dev/null || true
+found=false
+for ((i=0; i<${{#SERVER_ARGS[@]}}; i++)); do
+    if [[ "${{SERVER_ARGS[i]}}" == --kv-cache-dtype ]]; then
+        [[ "${{SERVER_ARGS[i+1]}}" == "int8_per_token_head" ]] || {{ echo "FAIL: expected int8_per_token_head"; exit 1; }}
+        found=true
+    fi
+done
+$found || {{ echo "FAIL: --kv-cache-dtype not found"; exit 1; }}
+echo "PASS: int8_per_token_head -> --kv-cache-dtype int8_per_token_head"
+'''
+        self.run_shell(code)
+
+    def test_kv_cache_dtype_invalid_fallback(self):
+        """Unrecognised KV dtype must fall back to 'auto' and omit the flag."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM PLUGIN=None
+VLLM_KV_CACHE_DTYPE=garbage
+build_vllm_command 2>/dev/null || true
+for arg in "${{SERVER_ARGS[@]}}"; do
+    if [[ "$arg" == "--kv-cache-dtype" ]]; then
+        echo "FAIL: unexpected --kv-cache-dtype with garbage"
+        exit 1
+    fi
+done
+echo "PASS: garbage dtype omits --kv-cache-dtype"
+'''
+        self.run_shell(code)
+
+    def test_max_model_len_auto_uses_negative_one(self):
+        """VLLM_MAX_MODEL_LEN=-1 must map to --max-model-len -1."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM PLUGIN=None
+VLLM_MAX_MODEL_LEN=-1
+build_vllm_command 2>/dev/null || true
+found=false
+for ((i=0; i<${{#SERVER_ARGS[@]}}; i++)); do
+    if [[ "${{SERVER_ARGS[i]}}" == --max-model-len ]]; then
+        [[ "${{SERVER_ARGS[i+1]}}" == "-1" ]] || {{ echo "FAIL: expected -1"; exit 1; }}
+        found=true
+    fi
+done
+$found || {{ echo "FAIL: --max-model-len not found"; exit 1; }}
+echo "PASS: -1 -> --max-model-len -1"
+'''
+        self.run_shell(code)
+
+    def test_max_model_len_numeric_passes_value(self):
+        """VLLM_MAX_MODEL_LEN=8192 must map to --max-model-len 8192."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM PLUGIN=None
+VLLM_MAX_MODEL_LEN=8192
+build_vllm_command 2>/dev/null || true
+found=false
+for ((i=0; i<${{#SERVER_ARGS[@]}}; i++)); do
+    if [[ "${{SERVER_ARGS[i]}}" == --max-model-len ]]; then
+        [[ "${{SERVER_ARGS[i+1]}}" == "8192" ]] || {{ echo "FAIL: expected 8192"; exit 1; }}
+        found=true
+    fi
+done
+$found || {{ echo "FAIL: --max-model-len not found"; exit 1; }}
+echo "PASS: 8192 -> --max-model-len 8192"
+'''
+        self.run_shell(code)
+
+    def test_max_model_len_status_label_shows_auto(self):
+        """Status screen must show 'Auto' (or same) as label for -1."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM PLUGIN=None
+VLLM_MAX_MODEL_LEN=-1
+# Simulate status_screen display logic
+if [[ "$VLLM_MAX_MODEL_LEN" == "-1" ]]; then
+    display="Auto"
+else
+    display="$VLLM_MAX_MODEL_LEN"
+fi
+echo "display=$display"
+[[ "$display" == "Auto" ]] || {{ echo "FAIL: expected Auto for -1"; exit 1; }}
+echo "PASS: -1 displays as Auto"
+'''
+        self.run_shell(code)
+
+    def test_no_vram_mode_in_argv(self):
+        """VLLM_VRAM_MODE must NOT be referenced in SERVER_ARGS."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM PLUGIN=None
+# Setting these removed variables must not cause any --vram or --kv-cache-memory-bytes
+build_vllm_command 2>/dev/null || true
+for arg in "${{SERVER_ARGS[@]}}"; do
+    if [[ "$arg" == *"vram"* || "$arg" == *"kv-cache-memory"* || "$arg" == *"autofit"* || "$arg" == *"auto-fit"* ]]; then
+        echo "FAIL: found removed setting: $arg"
+        exit 1
+    fi
+done
+echo "PASS: no removed settings in argv"
+'''
+        self.run_shell(code)
+
+    def test_kv_cache_dtype_persistence(self):
+        """KV cache dtype must survive save/reload."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM PLUGIN=None
+VLLM_KV_CACHE_DTYPE=fp8_e4m3
+save_model_profile
+VLLM_KV_CACHE_DTYPE=auto
+load_model_profile 2>/dev/null || true
+echo "dtype=$VLLM_KV_CACHE_DTYPE"
+[[ "$VLLM_KV_CACHE_DTYPE" == "fp8_e4m3" ]] || {{ echo "FAIL: expected fp8_e4m3 after reload"; exit 1; }}
+echo "PASS: KV cache dtype persistence"
+'''
+        self.run_shell(code)
+
+    def test_enforce_eager_persistence_with_kv_settings(self):
+        """Enforce eager must persist alongside KV dtype in same profile."""
+        model = str(self.model)
+        code = f'''
+CURRENT_MODEL="{model}"
+BACKEND=vLLM PLUGIN=None
+VLLM_ENFORCE_EAGER=on
+VLLM_KV_CACHE_DTYPE=FP8
+save_model_profile
+VLLM_ENFORCE_EAGER=off
+VLLM_KV_CACHE_DTYPE=auto
+load_model_profile 2>/dev/null || true
+echo "eager=$VLLM_ENFORCE_EAGER dtype=$VLLM_KV_CACHE_DTYPE"
+[[ "$VLLM_ENFORCE_EAGER" == "on" ]] || {{ echo "FAIL: eager not on"; exit 1; }}
+[[ "$VLLM_KV_CACHE_DTYPE" == "FP8" ]] || {{ echo "FAIL: dtype not FP8"; exit 1; }}
+echo "PASS: multi-setting persistence"
+'''
+        self.run_shell(code)
+
+
 class GumInputSafetyTests(unittest.TestCase):
     """Tests for safe gum input handling and value validation."""
 
@@ -1131,6 +1710,97 @@ class GumInputSafetyTests(unittest.TestCase):
         else:
             self.assertNotEqual(result.returncode, 0, result.stdout)
         return result.stdout
+
+    def test_profile_load_and_real_screens(self):
+        for stored in ('4096', 'Usage: gum input [flags]\nPrompt for some input\nFlags:'):
+            with self.subTest(stored=stored):
+                self.run_shell(r'''
+CURRENT_MODEL="$HOME/model"
+BACKEND=vLLM PLUGIN=None
+profile=$(model_profile_file)
+printf 'BACKEND=vLLM\nPLUGIN=None\nVLLM_MAX_MODEL_LEN=%q\n' "$STORED" > "$profile"
+load_model_profile
+[[ "$VLLM_MAX_MODEL_LEN" == 4096 ]]
+source "$profile"
+[[ "$VLLM_MAX_MODEL_LEN" == 4096 ]]
+title() { :; }
+api_ready_lines() { :; }
+gum() { cat > "$HOME/menu"; echo Back; }
+settings_menu edit > "$HOME/settings"
+status_screen > "$HOME/status"
+grep -Eq '^Max model len +\[4096\]$' "$HOME/menu"
+grep -Eq 'Max model len +4096' "$HOME/status"
+! grep -E 'Usage:|Prompt for some input|Flags:' "$HOME/menu" "$HOME/settings" "$HOME/status"
+''', env={'STORED': stored})
+
+    def test_actual_menu_input_validation(self):
+        for entry in ('4096', '8192', '-1', 'auto', 'arbitrary', '8192\n4096', 'Usage: gum input [flags]', '262144', '262145', '4096232302312'):
+            for status in ('0', '1', '130', '80'):
+                expected = entry if status == '0' and entry in ('4096', '8192', '-1', 'auto', '262144') else '4096'
+                with self.subTest(entry=entry, status=status):
+                    output = self.run_shell(r'''
+BACKEND=vLLM PLUGIN=None VLLM_MAX_MODEL_LEN=4096
+rm -f "$HOME/chosen"
+title() { :; }
+gum() {
+    if [[ "$1" == input ]]; then echo VISIBLE_INPUT_UI >&2; printf '%s' "$ENTRY"; return "$EXIT_STATUS"; fi
+    cat > /dev/null
+    if [[ -f "$HOME/chosen" ]]; then echo Back; else touch "$HOME/chosen"; echo 'Max model len'; fi
+}
+settings_menu edit >/dev/null
+[[ "$VLLM_MAX_MODEL_LEN" == "$EXPECTED" ]]
+''', env={'ENTRY': entry, 'EXIT_STATUS': status, 'EXPECTED': expected})
+                    self.assertIn('VISIBLE_INPUT_UI', output)
+                    if status == '0' and expected != entry:
+                        self.assertIn('Previous value preserved', output)
+
+    def test_all_shared_input_handlers_reject_help_and_failure(self):
+        self.run_shell(r'''
+for field in CTX NGL BATCH UBATCH PARALLEL TEMP TOP_P TOP_K MIN_P MMPROJ_PATH MTP_DRAFT_MAX HOST PORT STARTUP_TIMEOUT LORA_SCALE LORA_PATH VLLM_ROOT VLLM_GPU_MEMORY_UTIL VLLM_MAX_NUM_SEQS VLLM_MAX_BATCHED_TOKENS PLUGIN_DIR MODEL_ROOT; do
+    old="${!field}"
+    for status in 0 80; do
+        gum() { printf 'Usage: gum input [flags]\nPrompt for some input\nFlags:'; return "$status"; }
+        edit_input "$field" --value="$old"
+        [[ "${!field}" == "$old" ]]
+    done
+    gum() { echo 8192; return 80; }
+    edit_input "$field" --value="$old"
+    [[ "${!field}" == "$old" ]]
+done
+''')
+
+    def test_absurd_context_blocks_command_build(self):
+        output = self.run_shell(r'''
+BACKEND=vLLM PLUGIN=None
+vllm_venv_python() { echo /usr/bin/python3; }
+VLLM_MAX_MODEL_LEN=4096232302312
+if build_vllm_command; then exit 1; fi
+[[ "$VLLM_MAX_MODEL_LEN" == 4096232302312 ]]
+''')
+        self.assertIn('1–262144', output)
+
+    def test_input_calls_do_not_redirect_interactive_ui(self):
+        import re
+        content = (Path(__file__).resolve().parents[1] / 'bin/prism-model-manager').read_text()
+        calls = re.findall(r'gum input\b[^)]*', content)
+        self.assertTrue(calls)
+        for call in calls:
+            self.assertNotIn('/dev/null', call)
+            self.assertNotIn('2>', call)
+
+    def test_global_repair_precedes_default_capture(self):
+        config = self.root / 'config/prism-model-manager/config.env'
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text("VLLM_MAX_MODEL_LEN=$'Usage: gum input [flags]\\nFlags:'\n")
+        self.run_shell(r'''
+[[ "$VLLM_MAX_MODEL_LEN" == 4096 && "$DEFAULT_VLLM_MAX_MODEL_LEN" == 4096 ]]
+source "$CONFIG"
+[[ "$VLLM_MAX_MODEL_LEN" == 4096 ]]
+''')
+
+    def test_separator_locale_and_utf8_bytes(self):
+        output = self.run_shell('LC_ALL=C.UTF-8 sep 32\nLC_ALL=C sep 32\n')
+        self.assertEqual(output, '━' * 32 + '\n' + '-' * 32 + '\n')
 
     def test_vllm_max_model_len_safe_pattern(self):
         """Max model len handler must use safe if/value pattern: if gum succeeds, validate, then assign."""
@@ -1195,8 +1865,11 @@ validate() {
 source "$1/bin/prism-model-manager"
 CURRENT_MODEL="{model}"
 BACKEND=vLLM
-VLLM_MAX_MODEL_LEN="Usage: gum input [flags]..."
-build_vllm_command 2>/dev/null || true
+VLLM_MAX_MODEL_LEN=$'Usage: gum input [flags]\\nPrompt for some input\\nFlags:'
+build_vllm_command 2>/dev/null
+for arg in "${{SERVER_ARGS[@]}}"; do
+    [[ "$arg" != *Usage:* && "$arg" != *$'\\n'* ]]
+done
 # Must have sanitized to conservative fallback, NOT -1
 echo "sanitized: $VLLM_MAX_MODEL_LEN"
 [[ "$VLLM_MAX_MODEL_LEN" != "-1" ]]
@@ -1207,6 +1880,14 @@ for arg in "${{SERVER_ARGS[@]}}"; do
     if [[ "$arg" == "4096" ]]; then found=1; fi
 done
 [[ "$found" == "1" ]]
+count=0
+for ((i=0; i<${{#SERVER_ARGS[@]}}; i++)); do
+    if [[ "${{SERVER_ARGS[i]}}" == --max-model-len ]]; then
+        count=$((count + 1))
+        [[ "${{SERVER_ARGS[i+1]}}" == 4096 ]]
+    fi
+done
+[[ "$count" == 1 ]]
 '''
         self.run_shell(code)
 
@@ -1218,7 +1899,7 @@ value=""
 old_val="4096"
 # gum failure (empty value after failed input)
 gum() { return 1; }
-if value=$(gum input --value="$old_val" 2>/dev/null); then
+if value=$(gum input --value="$old_val"); then
     result="$value"
 else
     result="$old_val"

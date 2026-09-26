@@ -121,7 +121,7 @@ PREFIX="$TMP/install prefix" "$ROOT/install.sh"
 # Second install: with gum override, the upgrade prompt is auto-accepted (gum returns 0)
 # and the installer re-installs over itself. No errors should occur.
 PREFIX="$TMP/install prefix" "$ROOT/install.sh" 2>/dev/null || true
-[[ $("$TMP/install prefix/bin/prism-model-manager" --version) == "3.4.0" ]]
+[[ $("$TMP/install prefix/bin/prism-model-manager" --version) == "$VERSION" ]]
 PREFIX="$TMP/install prefix" "$ROOT/uninstall.sh"
 [[ ! -e "$TMP/install prefix/bin/prism-model-manager" && -f "$CONFIG" && -f "$LOGFILE" ]]
 PREFIX="$TMP/install prefix" "$ROOT/uninstall.sh"

@@ -89,19 +89,12 @@ sep() {
     [ "$cols" -gt 120 ] && cols=120
     [ "$cols" -lt 8 ] && cols=80
 
-    if [ -t 1 ]; then
-        # Use Unicode separator only when locale supports it
-        case "${LANG:-C}" in
-            *UTF-8*|*utf8*)
-                printf '%*s\n' "$cols" '' | tr ' ' '━'
-                ;;
-            *)
-                printf '%*s\n' "$cols" '' | tr ' ' '═'
-                ;;
-        esac
-    else
-        printf '%*s\n' "$cols" '' | tr ' ' '-'
-    fi
+    local character='-' line
+    case "${LC_ALL:-${LC_CTYPE:-${LANG:-C}}}" in
+        *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) character='━' ;;
+    esac
+    printf -v line '%*s' "$cols" ''
+    printf '%s\n' "${line// /$character}"
 }
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/prism-model-manager"
@@ -185,10 +178,16 @@ VLLM_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/prism-model-manager/backends/vll
 VLLM_LEGACY_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/prism-model-manager/vllm-venv"
 VLLM_GPU_MEMORY_UTIL="0.90"
 
+# vLLM KV cache dtype (auto by default; user-overridable)
+VLLM_KV_CACHE_DTYPE="auto"
+
 # vLLM runtime settings (stored per-model in profile)
 VLLM_MAX_MODEL_LEN="-1"
 VLLM_MAX_NUM_SEQS="16"
 VLLM_MAX_BATCHED_TOKENS="2048"
+
+# vLLM enforce eager mode (skip CUDA graph capture — useful on lower-VRAM GPUs)
+VLLM_ENFORCE_EAGER="off"
 
 # Plugin directory (per-model, editable). '' means default: PMM-managed plugin tree
 PLUGIN_DIR=""
@@ -197,6 +196,84 @@ LORA_SCALE="2"
 LORA_PATH=""
 
 CURRENT_MODEL=""
+
+valid_model_len_scalar() {
+    [[ "$1" == -1 || "$1" == auto || "$1" =~ ^[1-9][0-9]*$ ]]
+}
+
+# One input boundary for every editable scalar. Never commit failed/help output.
+valid_input_value() {
+    local name="$1" value="$2"
+    [[ "$value" != *$'\n'* && "$value" != *$'\r'* &&
+       "$value" != *'Usage:'* && "$value" != *'Prompt for some input'* &&
+       "$value" != *'Flags:'* ]] || return 1
+    case "$name" in
+        VLLM_MAX_MODEL_LEN)
+            valid_model_len_scalar "$value" || return 1
+            [[ "$value" == -1 || "$value" == auto ]] && return 0
+            # Bound the length before arithmetic to avoid integer overflow.
+            [[ ${#value} -le 6 ]] && (( value <= 262144 )) ;;
+        REASONING_BUDGET|MAX_OUTPUT_TOKENS) [[ "$value" =~ ^-?[0-9]+$ ]] ;;
+        VLLM_MAX_NUM_SEQS|VLLM_MAX_BATCHED_TOKENS) [[ "$value" =~ ^[1-9][0-9]*$ ]] ;;
+        VLLM_GPU_MEMORY_UTIL) [[ "$value" =~ ^0?\.[0-9]+$ ]] && [[ "$value" =~ [1-9] ]] ;;
+        VLLM_KV_CACHE_DTYPE) [[ "$value" =~ ^(auto|bfloat16|float16|fp8|fp8_e4m3|fp8_e5m2|int8_per_token_head)$ ]] ;;
+        VLLM_ENFORCE_EAGER) [[ "$value" =~ ^(0|off|1|on)$ ]] ;;
+        *) return 0 ;;
+    esac
+}
+
+edit_input() {
+    local name="$1" value
+    shift
+    # gum renders its interactive UI on stderr; keep it attached to the terminal.
+    if value=$(gum input "$@"); then
+        if valid_input_value "$name" "$value"; then
+            printf -v "$name" '%s' "$value"
+        else
+            if [ "$name" = VLLM_MAX_MODEL_LEN ]; then
+                echo 'Invalid Max model len: use -1, auto, or 1–262144. Previous value preserved.' >&2
+            else
+                printf 'Invalid %s. Previous value preserved.\n' "$name" >&2
+            fi
+            pause
+        fi
+    fi
+    return 0
+}
+
+sanitize_settings() {
+    if ! valid_model_len_scalar "$VLLM_MAX_MODEL_LEN"; then
+        echo 'WARNING: invalid VLLM_MAX_MODEL_LEN; restoring 4096.' >&2
+        VLLM_MAX_MODEL_LEN=4096
+        # At startup only repair this key, without clobbering a model profile
+        # before it has been loaded. Preserve all other config/profile entries.
+        local file="${1:-}" temporary
+        if [ -n "$file" ] && [ -f "$file" ]; then
+            temporary=$(mktemp "$file.XXXXXX") || return 1
+            # PMM serializes each assignment on one physical line with %q.
+            sed '/^[[:space:]]*\(export[[:space:]]\+\)\?VLLM_MAX_MODEL_LEN[[:space:]]*=/d' "$file" > "$temporary" || return 1
+            printf '\nVLLM_MAX_MODEL_LEN=4096\n' >> "$temporary" || return 1
+            mv -f -- "$temporary" "$file" || return 1
+        elif [ "${2:-}" = persist ] && [ -n "$CURRENT_MODEL" ]; then
+            save_model_profile || return 1
+        fi
+    fi
+    # Normalize VLLM_ENFORCE_EAGER to valid boolean-like values
+    if ! [[ "$VLLM_ENFORCE_EAGER" =~ ^(0|off|1|on)$ ]]; then
+        echo 'WARNING: invalid VLLM_ENFORCE_EAGER; restoring off.' >&2
+        VLLM_ENFORCE_EAGER=off
+        file="${1:-}" temporary=
+        if [ -n "$file" ] && [ -f "$file" ]; then
+            temporary=$(mktemp "$file.XXXXXX") || return 1
+            sed '/^[[:space:]]*\(export[[:space:]]\+\)\?VLLM_ENFORCE_EAGER[[:space:]]*=/d' "$file" > "$temporary" || return 1
+            printf '\nVLLM_ENFORCE_EAGER=off\n' >> "$temporary" || return 1
+            mv -f -- "$temporary" "$file" || return 1
+        elif [ "${2:-}" = persist ] && [ -n "$CURRENT_MODEL" ]; then
+            save_model_profile || return 1
+        fi
+    fi
+    return 0
+}
 
 # Config is trusted Bash, written with shell escaping. Never source untrusted files.
 # shellcheck disable=SC1090
@@ -222,6 +299,7 @@ if [ -f "$CONFIG" ]; then
     grep -Eq '^[[:space:]]*(export[[:space:]]+)?BACKEND[[:space:]]*=' "$CONFIG" && CONFIG_HAS_BACKEND=1
     grep -Eq '^[[:space:]]*(export[[:space:]]+)?PLUGIN[[:space:]]*=' "$CONFIG" && CONFIG_HAS_PLUGIN=1
     source "$CONFIG"
+    sanitize_settings "$CONFIG"
 fi
 SAVED_MODEL_ROOT="$MODEL_ROOT"
 SAVED_PRISM_ROOT="$PRISM_ROOT"
@@ -307,6 +385,8 @@ capture_runtime_defaults() {
     DEFAULT_VLLM_MAX_MODEL_LEN="$VLLM_MAX_MODEL_LEN"
     DEFAULT_VLLM_MAX_NUM_SEQS="$VLLM_MAX_NUM_SEQS"
     DEFAULT_VLLM_MAX_BATCHED_TOKENS="$VLLM_MAX_BATCHED_TOKENS"
+    DEFAULT_VLLM_KV_CACHE_DTYPE="$VLLM_KV_CACHE_DTYPE"
+    DEFAULT_VLLM_ENFORCE_EAGER="$VLLM_ENFORCE_EAGER"
 }
 capture_runtime_defaults
 
@@ -1177,6 +1257,10 @@ except Exception as e:
 }
 
 validate_settings() {
+    local input_field
+    for input_field in VLLM_MAX_MODEL_LEN VLLM_GPU_MEMORY_UTIL VLLM_MAX_NUM_SEQS VLLM_MAX_BATCHED_TOKENS; do
+        valid_input_value "$input_field" "${!input_field}" || { echo "Invalid $input_field (Max model len must be -1, auto, or 1–262144)." >&2; return 1; }
+    done
     python3 - "$CTX" "$NGL" "$BATCH" "$UBATCH" "$PARALLEL" "$PORT" "$TEMP" "$TOP_P" "$TOP_K" "$MIN_P" "$REASONING_BUDGET" "$MAX_OUTPUT_TOKENS" "$LORA_SCALE" "$MTP_DRAFT_MAX" "$STARTUP_TIMEOUT" <<'PY' || return 1
 import math, re, sys
 names = 'CTX NGL BATCH UBATCH PARALLEL PORT TEMP TOP_P TOP_K MIN_P REASONING_BUDGET MAX_OUTPUT_TOKENS LORA_SCALE MTP_DRAFT_MAX STARTUP_TIMEOUT'.split()
@@ -1405,6 +1489,21 @@ memory_status() {
     awk '/MemTotal:/ {total=$2} /MemAvailable:/ {available=$2} END {if (total) printf "RAM: %.1f / %.1f GiB used (available: %.1f GiB)\n", (total-available)/1048576, total/1048576, available/1048576}' /proc/meminfo
 }
 
+# Format a byte value as MiB or GiB for display.
+vram_or_unknown() {
+    local bytes="$1"
+    if [ -z "$bytes" ] || [ "$bytes" -le 0 ] 2>/dev/null; then
+        printf 'unknown'
+        return
+    fi
+    local mib=$(( bytes / 1024 / 1024 ))
+    if [ "$mib" -ge 1024 ]; then
+        printf '%d MiB (%.1f GiB)' "$mib" "$(python3 -c "print($mib / 1024)" 2>/dev/null || echo "0")"
+    else
+        printf '%d MiB' "$mib"
+    fi
+}
+
 build_command() {
     local effective_backend
     effective_backend=$(resolve_backend "$CURRENT_MODEL")
@@ -1468,22 +1567,11 @@ build_llamacpp_command() {
 }
 
 build_vllm_command() {
+    sanitize_settings "" persist
     local py
     py=$(vllm_venv_python) || { echo "vLLM venv not found at $VLLM_ROOT." >&2; return 1; }
 
     validate_settings || return 1
-
-    # Sanitize VLLM_MAX_MODEL_LEN before building the command array.
-    # Accept only: -1, auto, or a positive integer.
-    # Corruption protection prevents gum --help output from reaching vLLM.
-    # NOTE: -1 means model/config maximum (262144 on qwen3.8-27B).
-    # Never use -1 as automatic corruption recovery — that is unsafe
-    # on a 12 GB GPU. Instead, restore a conservative fallback.
-    local conservative_max_len=4096
-    if [[ "$VLLM_MAX_MODEL_LEN" != "-1" ]] && [[ "$VLLM_MAX_MODEL_LEN" != "auto" ]] && ! [[ "$VLLM_MAX_MODEL_LEN" =~ ^[1-9][0-9]*$ ]]; then
-        echo "WARNING: invalid VLLM_MAX_MODEL_LEN='$VLLM_MAX_MODEL_LEN', restoring $conservative_max_len" >&2
-        VLLM_MAX_MODEL_LEN="$conservative_max_len"
-    fi
 
     local effective_plugin
     effective_plugin=$(resolve_plugin "$CURRENT_MODEL")
@@ -1495,7 +1583,7 @@ build_vllm_command() {
     local served_model_name
     served_model_name=$(basename "$model_path")
 
-    # Build the base command (python -m vllm.entrypoints...)
+    # -- Unified command (no separate Auto-Fit / Manual modes) --
     local -a cmd
     cmd=(
         "$py"
@@ -1512,15 +1600,33 @@ build_vllm_command() {
         --tool-call-parser qwen3_coder
     )
 
+    # KV cache dtype — map UI-friendly names to vLLM values
+    local mapped_kv_dtype="" kv_cache_dtype_lower
+    kv_cache_dtype_lower="$(printf '%s' "$VLLM_KV_CACHE_DTYPE" | tr '[:upper:]' '[:lower:]')"
+    case "$kv_cache_dtype_lower" in
+        auto)                 mapped_kv_dtype="" ;;
+        bfloat16|bf16)        mapped_kv_dtype="bfloat16" ;;
+        float16|fp16)         mapped_kv_dtype="float16" ;;
+        fp8)                  mapped_kv_dtype="fp8" ;;
+        fp8_e4m3)             mapped_kv_dtype="fp8_e4m3" ;;
+        fp8_e5m2)             mapped_kv_dtype="fp8_e5m2" ;;
+        int8_per_token_head)  mapped_kv_dtype="int8_per_token_head" ;;
+        *)                    mapped_kv_dtype="" ;;
+    esac
+    if [ -n "$mapped_kv_dtype" ]; then
+        cmd+=(--kv-cache-dtype "$mapped_kv_dtype")
+    fi
+
+    # Enforce eager mode: skip CUDA graph capture on lower-VRAM GPUs
+    if [[ "$VLLM_ENFORCE_EAGER" =~ ^(1|on)$ ]]; then
+        cmd+=(--enforce-eager)
+    fi
+
     if [ "$effective_plugin" = "Mirai S" ]; then
         local plugin_dir
         plugin_dir=$(effective_plugin_dir "$CURRENT_MODEL" "Mirai S")
-        # Build SERVER_ARGS with env prefix for process-scoped PYTHONPATH.
-        # This prevents "PYTHONPATH=..." from being treated as argv[0].
-        # Preserve any existing PYTHONPATH at launch time.
         local site_pkgs="$plugin_dir/site-packages"
         if [ -d "$site_pkgs" ]; then
-            # Use env so the variable is set in the child's environment, not argv
             SERVER_ARGS=(
                 env
                 "PYTHONPATH=$site_pkgs${PYTHONPATH:+:$PYTHONPATH}"
@@ -1536,14 +1642,10 @@ build_vllm_command() {
     else
         SERVER_ARGS=("${cmd[@]}")
     fi
-
-    if [ "$MAX_OUTPUT_TOKENS" != "-1" ]; then
-        # Only affects llama.cpp; vLLM handles via per-request max_tokens
-        :
-    fi
 }
 
 save_config() {
+    sanitize_settings
     local temporary
     temporary=$(mktemp "$CONFIG.XXXXXX") || return 1
     {
@@ -1601,6 +1703,8 @@ save_config() {
         printf 'VLLM_MAX_MODEL_LEN=%q\n' "$VLLM_MAX_MODEL_LEN"
         printf 'VLLM_MAX_NUM_SEQS=%q\n' "$VLLM_MAX_NUM_SEQS"
         printf 'VLLM_MAX_BATCHED_TOKENS=%q\n' "$VLLM_MAX_BATCHED_TOKENS"
+        printf 'VLLM_KV_CACHE_DTYPE=%q\n' "$VLLM_KV_CACHE_DTYPE"
+        printf 'VLLM_ENFORCE_EAGER=%q\n' "$VLLM_ENFORCE_EAGER"
 
         printf 'CURRENT_MODEL=%q\n' "$CURRENT_MODEL"
     } > "$temporary" && mv -f -- "$temporary" "$CONFIG"
@@ -1648,9 +1752,12 @@ reset_model_runtime_defaults() {
     VLLM_MAX_MODEL_LEN="$DEFAULT_VLLM_MAX_MODEL_LEN"
     VLLM_MAX_NUM_SEQS="$DEFAULT_VLLM_MAX_NUM_SEQS"
     VLLM_MAX_BATCHED_TOKENS="$DEFAULT_VLLM_MAX_BATCHED_TOKENS"
+    VLLM_KV_CACHE_DTYPE="$DEFAULT_VLLM_KV_CACHE_DTYPE"
+    VLLM_ENFORCE_EAGER="$DEFAULT_VLLM_ENFORCE_EAGER"
 }
 
 save_model_profile() {
+    sanitize_settings
     [ -n "$CURRENT_MODEL" ] || return 0
 
     local profile
@@ -1696,6 +1803,8 @@ save_model_profile() {
         printf 'VLLM_MAX_MODEL_LEN=%q\n' "$VLLM_MAX_MODEL_LEN"
         printf 'VLLM_MAX_NUM_SEQS=%q\n' "$VLLM_MAX_NUM_SEQS"
         printf 'VLLM_MAX_BATCHED_TOKENS=%q\n' "$VLLM_MAX_BATCHED_TOKENS"
+        printf 'VLLM_KV_CACHE_DTYPE=%q\n' "$VLLM_KV_CACHE_DTYPE"
+        printf 'VLLM_ENFORCE_EAGER=%q\n' "$VLLM_ENFORCE_EAGER"
     } > "$temporary" && mv -f -- "$temporary" "$profile"
 }
 
@@ -1711,6 +1820,8 @@ load_model_profile() {
         # shellcheck disable=SC1090
         source "$profile"
     fi
+
+    sanitize_settings "" persist
 
     # ── Migrate legacy PLUGIN_DIR ──────────────────────────────
     # Old profiles stored PLUGIN_DIR under the model-local .pmm path:
@@ -1913,8 +2024,110 @@ stop_server_locked() {
 
 start_server() { with_lifecycle_lock start_server_locked; }
 
+# Detect the root cause from vLLM server log output and print a concise summary.
+# Returns the detected error message (or empty string if none found).
+detect_vllm_startup_error() {
+    local logfile="${1:-$LOGFILE}"
+    [ -f "$logfile" ] || return 1
+    python3 - "$logfile" <<'PYDETECT' 2>/dev/null || true
+import re, sys
+
+log = open(sys.argv[1], "r", errors="replace").read()
+
+# Priority: look for the most specific error first
+
+# Pattern 1: CUDA OOM
+m = re.search(r"CUDA\s+out\s+of\s+memory", log, re.IGNORECASE)
+if m:
+    # Extract surrounding context
+    ctx = log[max(0, m.start() - 200):m.end() + 300]
+    msg = "CUDA out of memory (OOM)."
+    # Try to extract Free/Total from nearby messages
+    free_m = re.search(r"Free\s+memory\s*[=:]\s*([0-9.]+)\s*(GiB|MiB)", ctx, re.IGNORECASE)
+    req_m = re.search(r"(desired|required|needed|requested)\s*(?:gpu\s+)?memory\s*[=:]\s*([0-9.]+)\s*(GiB|MiB)", ctx, re.IGNORECASE)
+    avail_m = re.search(r"available\s+(?:gpu\s+)?memory\s*[=:]\s*([0-9.]+)\s*(GiB|MiB)", ctx, re.IGNORECASE)
+    kv_m = re.search(r"(?:kv\s+)?cache\s+(?:memory\s+)?(?:size|bytes)\s*[=:]\s*([0-9.]+)\s*(?:\(?(\d+)\s*bytes\)?)?", ctx, re.IGNORECASE)
+    if free_m: msg += f" Free memory: {free_m.group(1)} {free_m.group(2)}"
+    if avail_m: msg += f" Available: {avail_m.group(1)} {avail_m.group(2)}"
+    if req_m: msg += f" Required: {req_m.group(1)} {req_m.group(2)}"
+    if kv_m: msg += f" KV cache: {kv_m.group(1)} {kv_m.group(2) or 'bytes'}"
+    print(msg, file=sys.stderr)
+    print(f"CUDA_OOM:{msg}")
+    return
+
+# Pattern 2: gpu_memory_utilization / desired GPU memory
+m = re.search(r"(?:gpu_memory_utilization|desired\s+(?:gpu\s+)?memory)", log, re.IGNORECASE)
+if m:
+    ctx = log[max(0, m.start() - 300):m.end() + 300]
+    util_m = re.search(r"(?:gpu_memory_utilization|utilization)\s*[=:]\s*([0-9.]+)", log, re.IGNORECASE)
+    free_m = re.search(r"Free\s+memory\s*[=:]\s*([0-9.]+)\s*(GiB|MiB)", ctx, re.IGNORECASE)
+    msg = "GPU memory utilization target cannot be satisfied."
+    if util_m: msg += f" Utilization: {util_m.group(1)}"
+    if free_m: msg += f" Free memory: {free_m.group(1)} {free_m.group(2)}"
+    # Also try to get the kv-cache-memory-bytes value
+    kv_m = re.search(r"kv.cache.memory.bytes\s*[=:]\s*([0-9.]+)", log, re.IGNORECASE)
+    if kv_m: msg += f" KV cache bytes: {kv_m.group(1)}"
+    print(msg, file=sys.stderr)
+    print(f"GPU_MEM_UTIL:{msg}")
+    return
+
+# Pattern 3: max_model_len related
+m = re.search(r"(?:max_model_len|maximum\s+model\s+length|estimated\s+maximum\s+model\s+length)", log, re.IGNORECASE)
+if m:
+    ctx = log[max(0, m.start() - 200):m.end() + 200]
+    msg = "max_model_len configuration issue."
+    mml = re.search(r"(?:max_model_len|maximum model length)\s*[=:]\s*(\d+)", ctx, re.IGNORECASE)
+    est = re.search(r"estimated\s+maximum\s+model\s+length\s*[=:]\s*(\d+)", ctx, re.IGNORECASE)
+    if mml: msg += f" max_model_len={mml.group(1)}"
+    if est: msg += f" estimated_max_len={est.group(1)}"
+    print(msg, file=sys.stderr)
+    print(f"MAX_MODEL_LEN:{msg}")
+    return
+
+# Pattern 4: ValueError or general initialization error
+m = re.search(r"ValueError:\s*(.*?)(?:\n|$)", log, re.IGNORECASE)
+if m:
+    msg = f"vLLM ValueError: {m.group(1).strip()}"
+    print(msg, file=sys.stderr)
+    print(f"VALUE_ERROR:{msg}")
+    return
+
+# Pattern 5: kv_cache_memory_bytes specific error
+m = re.search(r"(?:kv_cache_memory_bytes|kv-cache-memory-bytes).*?(?:error|invalid|unrecognized)", log, re.IGNORECASE)
+if m:
+    ctx = log[max(0, m.start() - 100):m.end() + 200]
+    msg = f"KV cache memory bytes configuration error: {ctx[:200]}"
+    print(msg, file=sys.stderr)
+    print(f"KV_CACHE_ERR:{msg}")
+    return
+
+# Pattern 6: RuntimeError: Engine core initialization failed (catch-all)
+m = re.search(r"RuntimeError:\s*(.*?)(?:\n|$)", log, re.IGNORECASE)
+if m:
+    msg = f"vLLM runtime error: {m.group(1).strip()}"
+    # Check if there is a more specific cause nearby
+    ctx = log[max(0, m.start() - 500):m.start()]
+    for cause in ["torch\.cuda\.OutOfMemoryError", "CUDA error", "hipError",
+                  "failed to create cache", "insufficient memory"]:
+        if re.search(cause, ctx, re.IGNORECASE):
+            msg = f"vLLM runtime error (likely OOM): {m.group(1).strip()}"
+            break
+    print(msg, file=sys.stderr)
+    print(f"RUNTIME_ERROR:{msg}")
+    return
+
+print("", file=sys.stderr)
+PYDETECT
+    return 1
+}
+
 start_server_locked() {
     server_pid >/dev/null && { echo "Managed process already exists; use Load / Switch Model." >&2; return 1; }
+    local effective_backend
+    effective_backend=$(resolve_backend "$CURRENT_MODEL")
+    local effective_plugin
+    effective_plugin=$(resolve_plugin "$CURRENT_MODEL")
+
     preflight || return 1
 
     # Interactive port conflict resolution
@@ -1928,7 +2141,7 @@ start_server_locked() {
             case "$port_choice" in
                 "Choose a different port")
                     local new_port
-                    new_port=$(gum input --value="8000" --placeholder "Enter an available port number")
+                    if ! new_port=$(gum input --value="8000" --placeholder="Enter an available port number"); then return 1; fi
                     if [ -z "$new_port" ] || ! [[ "$new_port" =~ ^[0-9]+$ ]]; then
                         echo "Invalid port." >&2; pause; return 1
                     fi
@@ -1947,11 +2160,7 @@ start_server_locked() {
     : > "$LOGFILE"
     echo "Loading $(basename "$CURRENT_MODEL") on $HOST:$PORT (timeout ${STARTUP_TIMEOUT}s)..."
     echo "Server startup: $(date)" >> "$LOGFILE"
-    local effective_backend
-    effective_backend=$(resolve_backend "$CURRENT_MODEL")
     echo "Backend: $effective_backend" >> "$LOGFILE"
-    local effective_plugin
-    effective_plugin=$(resolve_plugin "$CURRENT_MODEL")
     echo "Plugin: $effective_plugin" >> "$LOGFILE"
 
     if [ "$effective_backend" = "vLLM" ]; then
@@ -1961,8 +2170,10 @@ start_server_locked() {
         echo "Note: vLLM first start compiles CUDA kernels, may take 5+ minutes."
     fi
 
+    : > "$LOGFILE"
     nohup "${SERVER_ARGS[@]}" 9>&- >"$LOGFILE" 2>&1 < /dev/null &
-    local pid=$! deadline=$((SECONDS + STARTUP_TIMEOUT))
+    local pid=$!
+    local deadline=$((SECONDS + STARTUP_TIMEOUT))
     echo "$pid" > "$PIDFILE"
     process_start "$pid" > "$PIDFILE.start" || true
     cat /proc/sys/kernel/random/boot_id > "$PIDFILE.boot"
@@ -1972,12 +2183,27 @@ start_server_locked() {
         printf 'RUN_PORT=%q\n' "$PORT"
     } > "$STATE_DIR/runtime.env"
     trap 'stop_server_locked; exit 130' INT TERM
+
     while (( SECONDS < deadline )); do
         if ! server_pid >/dev/null; then
+            # Process died — detect error cause
             local backend_name
             backend_name=$(resolve_backend "$CURRENT_MODEL")
-            echo "${backend_name} server exited before becoming ready. Check backend/model compatibility." >&2
+            echo "${backend_name} server exited before becoming ready." >&2
             echo "Server log: $LOGFILE" >&2
+
+            # Detect and show root cause
+            local error_details
+            error_details=$(detect_vllm_startup_error "$LOGFILE" 2>&1 || true)
+
+            # Print summarized root cause
+            if [ -n "$error_details" ]; then
+                local error_category="${error_details%%:*}"
+                local error_message="${error_details#*:}"
+                echo "Root cause: $error_message" >&2
+            fi
+
+            # Show last lines of log
             tail -20 "$LOGFILE" >&2
             wait "$pid" 2>/dev/null || true
             rm -f "$PIDFILE" "$PIDFILE.start" "$PIDFILE.boot" "$STATE_DIR/runtime.env"
@@ -1990,7 +2216,14 @@ start_server_locked() {
         fi
         sleep 0.25
     done
+
     echo "Startup timed out; cleaning up this launch. Log: $LOGFILE" >&2
+    local error_details
+    error_details=$(detect_vllm_startup_error "$LOGFILE" 2>&1 || true)
+    if [ -n "$error_details" ]; then
+        local error_message="${error_details#*:}"
+        echo "Root cause: $error_message" >&2
+    fi
     tail -20 "$LOGFILE" >&2
     stop_server_locked || true
     return 1
@@ -2087,6 +2320,7 @@ switch_server_locked() {
 # ─────────────────────────────────────────────
 
 status_screen() {
+    sanitize_settings "" persist
     title
 
     local status
@@ -2146,13 +2380,37 @@ status_screen() {
 
     # ── vLLM profile ──
     elif [ "$effective_backend" = "vLLM" ]; then
+        local max_model_len_display
+        if [ "$VLLM_MAX_MODEL_LEN" = "-1" ] || [ "$VLLM_MAX_MODEL_LEN" = "auto" ]; then
+            max_model_len_display="Auto"
+        else
+            max_model_len_display="$VLLM_MAX_MODEL_LEN"
+        fi
+        local kv_dtype_display
+        case "$VLLM_KV_CACHE_DTYPE" in
+            auto) kv_dtype_display="Auto" ;;
+            bfloat16|bf16) kv_dtype_display="BF16" ;;
+            float16|fp16) kv_dtype_display="FP16" ;;
+            fp8) kv_dtype_display="FP8" ;;
+            fp8_e4m3) kv_dtype_display="FP8 E4M3" ;;
+            fp8_e5m2) kv_dtype_display="FP8 E5M2" ;;
+            int8_per_token_head) kv_dtype_display="INT8 per-token-head" ;;
+            *) kv_dtype_display="$VLLM_KV_CACHE_DTYPE" ;;
+        esac
         printf '  %-17s %s\n' "GPU memory util" "$VLLM_GPU_MEMORY_UTIL"
-        printf '  %-17s %s\n' "Max model len" "$VLLM_MAX_MODEL_LEN"
+        printf '  %-17s %s\n' "Max model len" "$max_model_len_display"
+        printf '  %-17s %s\n' "KV cache dtype" "$kv_dtype_display"
         printf '  %-17s %s\n' "Max num seqs" "$VLLM_MAX_NUM_SEQS"
         printf '  %-17s %s\n' "Max batched tokens" "$VLLM_MAX_BATCHED_TOKENS"
         if [ "$effective_plugin" = "Mirai S" ]; then
             printf '  %-17s %s\n' "MTP" "$MTP"
         fi
+        local enforce_eager_display
+        case "$VLLM_ENFORCE_EAGER" in
+            1|on) enforce_eager_display="on" ;;
+            *) enforce_eager_display="off" ;;
+        esac
+        printf '  %-17s %s\n' "Enforce eager" "$enforce_eager_display"
     fi
 
     printf '  %-17s %s\n' "Temperature" "$TEMP"
@@ -2301,7 +2559,8 @@ api_ready_view() {
 # ─────────────────────────────────────────────
 
 settings_menu() {
-    local mode="${1:-edit}"
+    sanitize_settings "" persist
+    local mode="${1:-edit}" value
 
     while true; do
         title
@@ -2374,20 +2633,48 @@ settings_menu() {
 
         # ── vLLM settings ──
         elif [ "$effective_backend" = "vLLM" ]; then
+            # Generate display label for Max model len
+            if [ "$VLLM_MAX_MODEL_LEN" = "-1" ] || [ "$VLLM_MAX_MODEL_LEN" = "auto" ]; then
+                max_model_len_label="Auto"
+            else
+                max_model_len_label="$VLLM_MAX_MODEL_LEN"
+            fi
+            # Generate display label for KV cache dtype
+            local kv_dtype_display
+            case "$VLLM_KV_CACHE_DTYPE" in
+                auto) kv_dtype_display="Auto" ;;
+                bfloat16|bf16) kv_dtype_display="BF16" ;;
+                float16|fp16) kv_dtype_display="FP16" ;;
+                fp8) kv_dtype_display="FP8" ;;
+                fp8_e4m3) kv_dtype_display="FP8 E4M3" ;;
+                fp8_e5m2) kv_dtype_display="FP8 E5M2" ;;
+                int8_per_token_head) kv_dtype_display="INT8 per-token-head" ;;
+                *) kv_dtype_display="$VLLM_KV_CACHE_DTYPE" ;;
+            esac
+            # Generate display label for Enforce eager
+            local enforce_eager_label
+            case "$VLLM_ENFORCE_EAGER" in
+                1|on) enforce_eager_label="on" ;;
+                *) enforce_eager_label="off" ;;
+            esac
             items+=(
                 "GPU memory util       [$VLLM_GPU_MEMORY_UTIL]"
-                "Max model len         [$VLLM_MAX_MODEL_LEN]"
+                "Max model len         [$max_model_len_label]"
+                "KV cache dtype        [$kv_dtype_display]"
                 "Max num sequences     [$VLLM_MAX_NUM_SEQS]"
                 "Max batched tokens    [$VLLM_MAX_BATCHED_TOKENS]"
-                "API host              [$HOST]"
-                "API port              [$PORT]"
-                "Startup timeout       [$STARTUP_TIMEOUT]"
+                "Enforce eager         [$enforce_eager_label]"
             )
             if [ "$effective_plugin" = "Mirai S" ]; then
                 items+=(
                 "MTP                   [$MTP]"
                 )
             fi
+            items+=(
+                "API host              [$HOST]"
+                "API port              [$PORT]"
+                "Startup timeout       [$STARTUP_TIMEOUT]"
+            )
         fi
 
         items+=(
@@ -2417,7 +2704,7 @@ settings_menu() {
             previous="$previous"$'\n'"$(declare -p CTX NGL FLASH BATCH UBATCH PARALLEL CACHE_K CACHE_V VISION MMPROJ_PATH MTP MTP_MODE MTP_DRAFT_MAX MTP_DRAFT_FLAG SERVER_BIN LORA_ENABLED LORA_SCALE LORA_PATH TEMP TOP_P TOP_K MIN_P REASONING_BUDGET MAX_OUTPUT_TOKENS)"
         fi
         if [ "$effective_backend" = "vLLM" ]; then
-            previous="$previous"$'\n'"$(declare -p VLLM_GPU_MEMORY_UTIL VLLM_MAX_MODEL_LEN VLLM_MAX_NUM_SEQS VLLM_MAX_BATCHED_TOKENS)"
+            previous="$previous"$'\n'"$(declare -p VLLM_GPU_MEMORY_UTIL VLLM_MAX_MODEL_LEN VLLM_MAX_NUM_SEQS VLLM_MAX_BATCHED_TOKENS VLLM_KV_CACHE_DTYPE VLLM_ENFORCE_EAGER)"
             # Also save MTP if Mirai S (for vLLM's benefit)
             if [ "$effective_plugin" = "Mirai S" ]; then
                 previous="$previous"$'\n'"$(declare -p MTP)"
@@ -2448,26 +2735,21 @@ settings_menu() {
                 ;;
 
             "Context size"*)
-                CTX=$(gum input \
+                edit_input CTX \
                     --value="$CTX" \
-                    --placeholder "8192 / 16384 / 32768 / 65536")
+                    --placeholder "8192 / 16384 / 32768 / 65536"
                 ;;
 
             "Max model len"*)
-                if value=$(gum input \
+                edit_input VLLM_MAX_MODEL_LEN \
                     --value="$VLLM_MAX_MODEL_LEN" \
-                    --placeholder="Use -1 for max, or enter a token count" 2>/dev/null); then
-                    # Accept ONLY -1 or positive integers
-                    if [[ "$value" == "-1" || "$value" =~ ^[1-9][0-9]*$ ]]; then
-                        VLLM_MAX_MODEL_LEN="$value"
-                    fi
-                fi
+                    --placeholder="Use -1, auto, or enter token count (1–262144)"
                 ;;
 
             "GPU layers"*)
-                NGL=$(gum input \
+                edit_input NGL \
                     --value="$NGL" \
-                    --placeholder "99 = full GPU, 0 = CPU")
+                    --placeholder "99 = full GPU, 0 = CPU"
                 ;;
 
             "Flash Attention"*)
@@ -2480,15 +2762,15 @@ auto
                 ;;
 
             "Batch size"*)
-                BATCH=$(gum input --value="$BATCH")
+                edit_input BATCH --value="$BATCH"
                 ;;
 
             "UBatch size"*)
-                UBATCH=$(gum input --value="$UBATCH")
+                edit_input UBATCH --value="$UBATCH"
                 ;;
 
             "Parallel slots"*)
-                PARALLEL=$(gum input --value="$PARALLEL")
+                edit_input PARALLEL --value="$PARALLEL"
                 ;;
 
             "KV cache K"*)
@@ -2522,39 +2804,31 @@ iq4_nl
                 ;;
 
             "Temperature"*)
-                TEMP=$(gum input --value="$TEMP")
+                edit_input TEMP --value="$TEMP"
                 ;;
 
             "Top-P"*)
-                TOP_P=$(gum input --value="$TOP_P")
+                edit_input TOP_P --value="$TOP_P"
                 ;;
 
             "Top-K"*)
-                TOP_K=$(gum input --value="$TOP_K")
+                edit_input TOP_K --value="$TOP_K"
                 ;;
 
             "Min-P"*)
-                MIN_P=$(gum input --value="$MIN_P")
+                edit_input MIN_P --value="$MIN_P"
                 ;;
 
             "Reasoning budget"*)
-                if value=$(gum input \
+                edit_input REASONING_BUDGET \
                     --value="$REASONING_BUDGET" \
-                    --placeholder="Use -1 for unlimited, 0 to disable, or a token budget" 2>/dev/null); then
-                    if [[ "$value" =~ ^-?[0-9]+$ ]]; then
-                        REASONING_BUDGET="$value"
-                    fi
-                fi
+                    --placeholder="Use -1 for unlimited, 0 to disable, or a token budget"
                 ;;
 
             "Max output tokens"*)
-                if value=$(gum input \
+                edit_input MAX_OUTPUT_TOKENS \
                     --value="$MAX_OUTPUT_TOKENS" \
-                    --placeholder="Use -1 for unlimited, or a token budget" 2>/dev/null); then
-                    if [[ "$value" =~ ^-?[0-9]+$ ]]; then
-                        MAX_OUTPUT_TOKENS="$value"
-                    fi
-                fi
+                    --placeholder="Use -1 for unlimited, or a token budget"
                 ;;
 
             "Vision"*)
@@ -2565,10 +2839,10 @@ on
                 [ -n "$value" ] && VISION="$value"
                 ;;
 
-            "Projector path"*) MMPROJ_PATH=$(gum input --value="$MMPROJ_PATH" --placeholder "Empty: one adjacent mmproj") ;;
+            "Projector path"*) edit_input MMPROJ_PATH --value="$MMPROJ_PATH" --placeholder "Empty: one adjacent mmproj" ;;
             "MTP mode"*) MTP_MODE=$(printf 'mtp\ndraft-mtp\n' | gum choose) ;;
             "MTP draft flag"*) MTP_DRAFT_FLAG=$(printf '%s\n' --spec-draft-n-max --draft-max | gum choose) ;;
-            "MTP draft max"*) MTP_DRAFT_MAX=$(gum input --value="$MTP_DRAFT_MAX") ;;
+            "MTP draft max"*) edit_input MTP_DRAFT_MAX --value="$MTP_DRAFT_MAX" ;;
             "MTP"*) MTP=$(printf 'off\non\n' | gum choose) ;;
             "Backend executable"*)
                 if [ -n "${PMM_SERVER_BIN:-}" ]; then
@@ -2577,7 +2851,8 @@ on
                     continue
                 fi
                 local value
-                value=$(gum input --value="$SERVER_BIN" --placeholder "/path/to/custom/llama-server") || continue
+                if ! value=$(gum input --value="$SERVER_BIN" --placeholder="/path/to/custom/llama-server"); then continue; fi
+                valid_input_value SERVER_BIN "$value" || continue
                 if [ -z "$value" ] || [ ! -f "$value" ] || [ ! -x "$value" ]; then
                     echo "Keep the previous backend: choose a nonempty executable file path." >&2
                     pause
@@ -2585,9 +2860,9 @@ on
                 fi
                 SERVER_BIN="$value"
                 ;;
-            "API host"*) HOST=$(gum input --value="$HOST") ;;
-            "API port"*) PORT=$(gum input --value="$PORT") ;;
-            "Startup timeout"*) STARTUP_TIMEOUT=$(gum input --value="$STARTUP_TIMEOUT") ;;
+            "API host"*) edit_input HOST --value="$HOST" ;;
+            "API port"*) edit_input PORT --value="$PORT" ;;
+            "Startup timeout"*) edit_input STARTUP_TIMEOUT --value="$STARTUP_TIMEOUT" ;;
 
             "Uncensored LoRA"*)
                 local value
@@ -2598,49 +2873,83 @@ on
                 ;;
 
             "LoRA scale"*)
-                LORA_SCALE=$(gum input \
+                edit_input LORA_SCALE \
                     --value="$LORA_SCALE" \
-                    --placeholder "2")
+                    --placeholder "2"
                 ;;
 
             "LoRA file"*)
-                LORA_PATH=$(gum input \
+                edit_input LORA_PATH \
                     --value="$LORA_PATH" \
-                    --placeholder "/path/to/adapter.gguf")
+                    --placeholder "/path/to/adapter.gguf"
                 ;;
 
             "vLLM environment"*)
-                VLLM_ROOT=$(gum input \
+                edit_input VLLM_ROOT \
                     --value="$VLLM_ROOT" \
-                    --placeholder "~/.local/share/prism-model-manager/backends/vllm-venv")
+                    --placeholder "~/.local/share/prism-model-manager/backends/vllm-venv"
                 ;;
 
             "GPU memory util"*)
-                VLLM_GPU_MEMORY_UTIL=$(gum input \
+                edit_input VLLM_GPU_MEMORY_UTIL \
                     --value="$VLLM_GPU_MEMORY_UTIL" \
-                    --placeholder "0.90 = fraction of GPU memory")
+                    --placeholder "0.90 = fraction of GPU memory"
+                ;;
+
+            "Max model len"*)
+                local choice
+                choice=$(printf 'Auto\nEdit manually\n' | gum choose || true)
+                if [ "$choice" = "Auto" ]; then
+                    VLLM_MAX_MODEL_LEN="-1"
+                elif [ "$choice" = "Edit manually" ]; then
+                    edit_input VLLM_MAX_MODEL_LEN \
+                        --value="$VLLM_MAX_MODEL_LEN" \
+                        --placeholder="Use -1, auto, or enter token count (1–262144)"
+                fi
+                ;;
+
+            "KV cache dtype"*)
+                local value
+                value=$(printf 'Auto\nBF16\nFP16\nFP8\nFP8 E4M3\nFP8 E5M2\nINT8 per-token-head\n' | gum choose || true)
+                if [ -n "$value" ]; then
+                    case "$value" in
+                        "Auto") VLLM_KV_CACHE_DTYPE="auto" ;;
+                        "BF16") VLLM_KV_CACHE_DTYPE="bfloat16" ;;
+                        "FP16") VLLM_KV_CACHE_DTYPE="float16" ;;
+                        "FP8") VLLM_KV_CACHE_DTYPE="fp8" ;;
+                        "FP8 E4M3") VLLM_KV_CACHE_DTYPE="fp8_e4m3" ;;
+                        "FP8 E5M2") VLLM_KV_CACHE_DTYPE="fp8_e5m2" ;;
+                        "INT8 per-token-head") VLLM_KV_CACHE_DTYPE="int8_per_token_head" ;;
+                    esac
+                fi
                 ;;
 
             "Max num sequences"*)
-                VLLM_MAX_NUM_SEQS=$(gum input \
+                edit_input VLLM_MAX_NUM_SEQS \
                     --value="$VLLM_MAX_NUM_SEQS" \
-                    --placeholder "16")
+                    --placeholder "16"
                 ;;
 
             "Max batched tokens"*)
-                VLLM_MAX_BATCHED_TOKENS=$(gum input \
+                edit_input VLLM_MAX_BATCHED_TOKENS \
                     --value="$VLLM_MAX_BATCHED_TOKENS" \
-                    --placeholder "2048")
+                    --placeholder "2048"
+                ;;
+
+            "Enforce eager"*)
+                local value
+                value=$(printf 'off\non\n' | gum choose || true)
+                [ -n "$value" ] && VLLM_ENFORCE_EAGER="$value"
                 ;;
 
             "Plugin directory"*)
-                PLUGIN_DIR=$(gum input \
+                edit_input PLUGIN_DIR \
                     --value="$(effective_plugin_dir "$CURRENT_MODEL" "$effective_plugin")" \
-                    --placeholder "Custom path, or empty for default")
+                    --placeholder "Custom path, or empty for default"
                 ;;
 
             "Model root"*)
-                MODEL_ROOT=$(gum input --value="$MODEL_ROOT")
+                edit_input MODEL_ROOT --value="$MODEL_ROOT"
                 ;;
 
             "▶ Start with these settings")
@@ -2962,7 +3271,17 @@ main_menu() {
         [ -n "$format_str" ] && printf '  %-14s %s\n' "Format" "$format_str"
 
         if [ -n "$CURRENT_MODEL" ]; then
-            printf '  %-14s %s\n' "Context" "$CTX"
+            if [ "$effective_backend" = "vLLM" ]; then
+                local max_model_len_display
+                if [ "$VLLM_MAX_MODEL_LEN" = "-1" ] || [ "$VLLM_MAX_MODEL_LEN" = "auto" ]; then
+                    max_model_len_display="Auto"
+                else
+                    max_model_len_display="$VLLM_MAX_MODEL_LEN"
+                fi
+                printf '  %-14s %s\n' "Context" "$max_model_len_display"
+            else
+                printf '  %-14s %s\n' "Context" "$CTX"
+            fi
             printf '  %-14s ' "Max tokens"
             if [ "$MAX_OUTPUT_TOKENS" = -1 ]; then
                 printf '%b%s%b' "$C_GRAY" "Unlimited" "$C_RESET"
