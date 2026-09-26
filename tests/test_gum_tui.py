@@ -33,9 +33,9 @@ class GumTerminalTests(unittest.TestCase):
                                       XDG_STATE_HOME=home+'/state', XDG_DATA_HOME=home+'/data',
                                       TERM='xterm-256color', LC_ALL='C.UTF-8')
                     os.execvp('bash', ['bash', '-c',
-                        'source "$1"; VLLM_MAX_MODEL_LEN=4096; '
-                        'edit_input VLLM_MAX_MODEL_LEN --value="$VLLM_MAX_MODEL_LEN"; '
-                        'printf "\\nRESULT=%s\\n" "$VLLM_MAX_MODEL_LEN"', 'test', str(source)])
+                        'source "$1"; CTX=4096; '
+                        'edit_input CTX --value="$CTX"; '
+                        'printf "\\nRESULT=%s\\n" "$CTX"', 'test', str(source)])
                 data = bytearray()
 
                 def read_until(predicate, timeout=5):

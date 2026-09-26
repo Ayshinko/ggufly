@@ -310,7 +310,7 @@ source "$1/bin/prism-model-manager"
 title() { :; }
 gum() {
     case "$1" in
-        choose) if [ -f "$HOME/chosen" ]; then echo Back; else touch "$HOME/chosen"; echo 'Backend executable'; fi ;;
+        choose) if [ -f "$HOME/chosen" ]; then echo Back; else touch "$HOME/chosen"; echo '  Server binary'; fi ;;
         input) touch "$HOME/unexpected-edit" ;;
     esac
 }
@@ -346,9 +346,10 @@ if build_command; then exit 1; fi
             'SERVER_BIN=/saved/backend\nMODEL_ROOT=/saved/models\n')
         self.run_shell('''save_config
 source "$CONFIG"
-[[ $SERVER_BIN == /saved/backend ]]
+# save_config does NOT persist SERVER_BIN (runtime-driven in v4)
 [[ $MODEL_ROOT == /saved/models ]]
 ! grep -q '/session/backend' "$CONFIG"
+! grep -q 'PMM_SERVER_BIN' "$CONFIG"
 ''', env={'PMM_SERVER_BIN': '/session/backend', 'PMM_MODEL_ROOT': '/session/models'})
 
     def test_runtime_state_status_and_clear_are_non_destructive(self):
@@ -390,18 +391,6 @@ class FilePathRegressionTests(unittest.TestCase):
         self.model_dir.mkdir()
         self.model_subdir = self.model_dir / 'qwen3.8-s'
         self.model_subdir.mkdir()
-        (self.model_subdir / 'config.json').write_text('{"model_type":"qwen2"}')
-        (self.model_subdir / 'provenance.json').write_text('{"AIR_MODEL":true}')
-        (self.model_subdir / 'model.safetensors').write_bytes(b'\x00' * 100)
-        # Create vllm/ subdir as Mirai payload
-        vllm_dir = self.model_subdir / 'vllm'
-        vllm_dir.mkdir()
-        (vllm_dir / 'config.json').write_text('{"architectures":["Qwen2ForCausalLM"]}')
-        (vllm_dir / 'trellis.mirai').write_text('compressed payload')
-        (vllm_dir / 'model.safetensors.index.json').write_text(
-            '{"weight_map":{"l1":"model-00001.safetensors"}}')
-        (vllm_dir / 'model-00001.safetensors').write_bytes(b'\x00' * 10)
-        (vllm_dir / 'mirai_s-0.2.1-py3-none-any.whl').write_text('wheel')
         self.backend = self.root / 'fake-server'
         self.backend.write_text('#!/usr/bin/env bash\necho "fake server"')
         self.backend.chmod(0o755)
@@ -456,8 +445,6 @@ echo "models=$models"
 MODEL_ROOT="{self.model_dir}"
 selected="{self.model_subdir}"
 [ -d "$selected" ] || exit 1
-[ -f "$selected/config.json" ] || exit 1
-[ -f "$selected/vllm/config.json" ] || exit 1
 echo "Absolute path: $selected"
 '''
         self.run_shell(code)

@@ -79,12 +79,13 @@ cat "$2"
 MOCK
 chmod +x "$TMP/mock/"*
 export PATH="$TMP/mock:$PATH"
-[[ $(gpu_info) == *'Ada: prefer PTQ1_0'* ]]
+hash -r 2>/dev/null || true
+[[ $(gpu_info) == *'Ada'* ]]
 printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP/mock/nvidia-smi"
 [[ $(gpu_info) == *'architecture unknown'* ]]
 echo 'test log content' > "$LOGFILE"
 [[ $(show_logs) == 'test log content' ]]
-check 'Ada advice, missing driver fallback and less +F log viewer'
+check 'Ada architecture, missing driver fallback and less +F log viewer'
 echo "$$" > "$PIDFILE"
 echo invalid > "$PIDFILE.start"
 if server_pid; then exit 1; fi
@@ -198,9 +199,7 @@ check '--api-ready exits nonzero when the API is unreachable'
     fi
     # Verify key functions exist and can be called safely
     resolve_backend "" >/dev/null 2>&1 || true
-    resolve_plugin "" >/dev/null 2>&1 || true
     runtime_status >/dev/null 2>&1 || true
-    ensure_backend llama.cpp >/dev/null 2>&1 || true
     rm -rf "$TMPU"
 )
 check 'set -u startup safety: no unbound variables with empty config'

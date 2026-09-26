@@ -1,50 +1,58 @@
 #!/usr/bin/env python3
-"""PMM model format detection helper.
+"""PMM model format detection helper — v4 GGUF-focused edition.
 
-Detects model format, architecture, and compatibility with available backends.
+Detects model format, architecture, codec, and compatibility.
 Output is JSON for consumption by the PMM shell script.
 
-Accepts a path argument (file or directory). Returns:
-  format: 'gguf' | 'hf' (HuggingFace safe tensors) | 'mirai_s' | 'unknown'
+Accepts a path argument (file). Returns:
+  format: 'gguf' | 'gguf_shard' | 'mirai_s_gguf' | 'unknown'
   name: human-readable model name
   architecture: model architecture string
   parameters_b: estimated parameter count in billions
-  quantization: quantization format if known
+  codec: quantization/codec format
   context_length: maximum context length if known
   file_count: number of relevant weight files
-  total_size_gib: total size of weight files in GiB
-  compatible_backends: list of backends that can serve this model
-  recommended_backend: best-match backend
+  total_size_mib: total size of weight files in MiB
   reason: explanation string
 """
 import json
 import os
 import re
+import struct
+import subprocess
 import sys
 from pathlib import Path
 
 
-def read_json_safe(path, max_size=1024 * 1024):
-    """Read and parse a JSON file, with size limit."""
-    try:
-        if os.path.getsize(path) > max_size:
-            return None
-        with open(path, 'r', encoding='utf-8', errors='replace') as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError, UnicodeError):
-        return None
+# Extended GGML type to codec name mapping including Mirai types
+GGML_TYPES = {
+    0: 'F32', 1: 'F16', 2: 'Q4_0', 3: 'Q4_1', 4: 'Q4_2', 5: 'Q4_3',
+    6: 'Q5_0', 7: 'Q8_0', 8: 'Q5_0', 9: 'Q5_1',
+    10: 'Q2_K', 11: 'Q3_K_S', 12: 'Q3_K_M', 13: 'Q3_K_L',
+    14: 'Q4_K_S', 15: 'Q4_K_M', 16: 'Q5_K_S', 17: 'Q5_K_M', 18: 'Q6_K',
+    19: 'IQ2_XXS', 20: 'IQ2_XS', 21: 'Q2_K_S', 22: 'IQ3_XS', 23: 'IQ3_XXS',
+    24: 'IQ1_S', 25: 'IQ4_NL', 26: 'IQ3_S', 27: 'IQ3_M', 28: 'IQ2_S',
+    29: 'IQ2_M', 30: 'IQ4_XS', 31: 'IQ1_M', 32: 'BF16',
+    # Extended/custom types
+    36: 'TQ1_0', 37: 'TQ2_0', 38: 'MXFP4_MOE', 39: 'NVFP4',
+    40: 'Q1_0', 41: 'Q2_0',
+}
+
+# Mirai-specific GGML types (custom type enum)
+MIRAI_GGML_TYPES = {
+    100: 'MS_V4T8',
+    101: 'MS_V2T4',
+    102: 'MS_V2T6',
+    103: 'MS_I3',
+}
 
 
 def get_gguf_info(path):
     """Read GGUF metadata (delegates to prism-gguf-info.py)."""
-    import subprocess
-
-    # Find the gguf info script
     script_dir = Path(__file__).resolve().parent
     gguf_info = script_dir / 'prism-gguf-info.py'
 
     if not gguf_info.exists():
-        # Try relative to the calling context
         gguf_info = Path(os.environ.get('PMM_BIN_DIR', '')) / 'prism-gguf-info.py'
 
     if not gguf_info.exists():
@@ -61,149 +69,193 @@ def get_gguf_info(path):
         return None
 
 
+def inspect_gguf_tensors(path):
+    """Inspect GGUF tensor metadata to detect Mirai-specific types.
+
+    Reads only the tensor info metadata block (not raw tensor data).
+    """
+    try:
+        with open(path, 'rb') as stream:
+            def read(size):
+                if size > 16 * 1024 * 1024 or stream.tell() + size > 64 * 1024 * 1024:
+                    return b''
+                return stream.read(size)
+
+            def number(fmt):
+                return struct.unpack('<' + fmt, read(struct.calcsize(fmt)))[0]
+
+            def string():
+                return read(number('Q')).decode('utf-8', errors='replace')
+
+            header = read(4)
+            if header != b'GGUF':
+                return None
+            version = number('I')
+            if version not in (2, 3):
+                return None
+
+            tensor_count = number('Q')
+            metadata_count = number('Q')
+
+            # Skip metadata kv pairs
+            for _ in range(metadata_count):
+                _ = string()  # key
+                kind = number('I')
+                sub_kind = 0
+                if kind == 8:  # string
+                    _ = string()
+                elif kind in (0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12):
+                    _ = read(struct.calcsize('<Q'))  # skip single value
+                elif kind == 9:  # array
+                    sub_kind = number('I')
+                    count_arr = number('Q')
+                    if sub_kind == 8:
+                        for _ in range(min(count_arr, 100)):
+                            _ = string()
+                    else:
+                        _ = read(struct.calcsize('<Q') * min(count_arr, 100))
+                else:
+                    break
+
+            if tensor_count > 10000 or tensor_count <= 0:
+                return None
+
+            # Read tensor info to detect Mirai-specific types
+            tensors = []
+            mirai_tensors = []
+            unique_types = set()
+            for _ in range(min(tensor_count, 500)):
+                name = string()
+                n_dims = number('I')
+                _ = number('Q') * n_dims  # skip dimensions
+                ggml_type = number('I')
+
+                unique_types.add(ggml_type)
+                tensors.append({'name': name, 'type': ggml_type})
+
+                # Detect Mirai-specific tensors
+                if ggml_type >= 100:
+                    mirai_tensors.append(name)
+                if name.startswith('mirai.'):
+                    mirai_tensors.append(name)
+                if 'rot' in name or 'head_aux' in name or 'codebook' in name:
+                    if ggml_type >= 100 or ggml_type > 41:
+                        mirai_tensors.append(name)
+
+            return {
+                'tensor_count': min(tensor_count, 500),
+                'unique_types': [GGML_TYPES.get(t, MIRAI_GGML_TYPES.get(t, f'custom_{t}')) for t in sorted(unique_types)],
+                'mirai_tensors': list(set(mirai_tensors)),
+                'has_mirai_type': any(100 <= t <= 103 for t in unique_types),
+            }
+    except Exception:
+        return None
+
+
+def detect_codec_from_types(unique_types_str, info, tensors_info):
+    """Determine the codec from GGUF type information."""
+    unique_types = set()
+
+    # Parse from tensor inspection
+    if tensors_info:
+        for t in tensors_info.get('unique_types', []):
+            unique_types.add(t)
+        if tensors_info.get('has_mirai_type'):
+            return 'Mirai S'
+
+    # Check metadata for Mirai version
+    if info:
+        mirai_version = info.get('mirai.version')
+        if mirai_version is not None:
+            return f'Mirai S'
+
+    # Check for Mirai-specific tensor names
+    if tensors_info and tensors_info.get('mirai_tensors'):
+        mirai_names = tensors_info['mirai_tensors']
+        if any('codebook' in n or 'mirai' in n for n in mirai_names):
+            return 'Mirai S'
+
+    # Check file_type for Prism/Bonsai codecs (140-179 range)
+    if info:
+        file_type = info.get('general.file_type')
+        if file_type is not None:
+            bonsai_map = {
+                140: 'PTQ1_0', 141: 'PQ2_0', 142: 'TQ1_0', 143: 'PTQ1_0',
+                144: 'PQ2_0', 145: 'TQ2_0', 146: 'PTQ1_0', 147: 'PQ2_0',
+            }
+            if file_type in bonsai_map:
+                return bonsai_map[file_type]
+
+    # Standard quantization detection from metadata
+    if info:
+        quant = info.get('quantization', 'Unknown')
+        if quant != 'Unknown' and quant != 'Unknown (None)':
+            return quant
+
+    # Fallback: filename hints for known special codecs
+    return 'Unknown'
+
+
 def detect_gguf(path):
     """Detect and describe a GGUF model."""
     info = get_gguf_info(path)
-    if not info:
-        return None
+    tensors_info = inspect_gguf_tensors(path)
 
-    name = info.get('general.name', os.path.basename(path))
-    arch = info.get('general.architecture', 'unknown')
-    quant = info.get('quantization', 'Unknown')
-    ctx = info.get(f'{arch}.context_length', 0) if arch != 'unknown' else 0
-    ftype = info.get('general.file_type')
+    name = info.get('general.name', os.path.basename(path)) if info else os.path.basename(path)
+    arch = info.get('general.architecture', 'unknown') if info else 'unknown'
+    ctx = info.get(f'{arch}.context_length', 0) if info and arch != 'unknown' else 0
+
+    # Detect format
+    fmt = 'gguf'
+    if info and info.get('format') == 'mirai_s_gguf':
+        fmt = 'mirai_s_gguf'
+    if tensors_info and tensors_info.get('has_mirai_type'):
+        fmt = 'mirai_s_gguf'
+
+    # Determine codec
+    codec = detect_codec_from_types(None, info, tensors_info)
 
     # Estimate parameter count from file size
-    size_mb = os.path.getsize(path) / (1024 * 1024)
-    params_b = round(size_mb / 500, 1) if size_mb > 0 else 0
+    size_mib = os.path.getsize(path) / (1024 * 1024)
+    params_b = round(size_mib / 500, 1) if size_mib > 0 else 0
 
-    compatible = ['llama.cpp']
-    recommended = 'llama.cpp'
-
-    # Check for Bonsai / Prism-specific formats
-    if 'PTQ1_0' in quant or 'PQ2_0' in quant or name.upper().find('BONSAI') >= 0:
-        compatible = ['llama.cpp']
-        recommended = 'llama.cpp'
+    # Context
+    format_str = fmt
+    reason = f'GGUF: {arch}, {codec}'
+    if fmt == 'mirai_s_gguf':
+        format_str = 'Mirai S GGUF'
+        reason = f'Mirai GGUF: {arch}, {codec}'
 
     return {
-        'format': 'gguf',
+        'format': format_str,
         'name': name,
         'architecture': arch,
         'parameters_b': params_b,
-        'quantization': quant,
+        'codec': codec,
         'context_length': ctx,
         'file_count': 1,
-        'file_sizes_mib': [round(os.path.getsize(path) / (1024 * 1024), 1)],
-        'total_size_mib': round(size_mb, 1),
-        'compatible_backends': compatible,
-        'recommended_backend': recommended,
-        'reason': f'GGUF format: {arch}, {quant}',
+        'file_sizes_mib': [round(size_mib, 1)],
+        'total_size_mib': round(size_mib, 1),
+        'gguf_info': info,
+        'tensor_info': {
+            'count': tensors_info['tensor_count'] if tensors_info else 0,
+            'types': tensors_info['unique_types'] if tensors_info else [],
+            'has_mirai_types': tensors_info['has_mirai_type'] if tensors_info else False,
+        } if tensors_info else None,
+        'reason': reason,
     }
 
 
-def detect_hf_directory(path: Path):
-    """Detect and describe a HuggingFace model directory with safe tensors."""
-    config_path = path / 'config.json'
-    model_index_path = path / 'model.safetensors.index.json'
-
-    if not config_path.exists():
-        return None
-
-    config = read_json_safe(str(config_path))
-    if not config:
-        return {'format': 'hf_unreadable', 'reason': 'config.json present but unreadable'}
-
-    arch = config.get('model_type', 'unknown')
-    name = config.get('_name_or_path', path.name)
-    params_b = config.get('num_parameters', 0)
-
-    # Try to get context length
-    max_ctx = (config.get('max_position_embeddings') or
-               config.get('max_sequence_length') or 0)
-    if isinstance(max_ctx, str):
-        try:
-            max_ctx = int(max_ctx)
-        except (ValueError, TypeError):
-            max_ctx = 0
-
-    # Detect quantization from config
-    quant = 'Unknown'
-    torch_dtype = config.get('torch_dtype', 'unknown')
-    quantization_config = config.get('quantization_config', {})
-    if quantization_config:
-        quant_method = quantization_config.get('quant_method', '')
-        if quant_method:
-            quant = f'{quant_method} ({torch_dtype})'
-    else:
-        quant = torch_dtype
-
-    # Find all weight files
-    weight_files = []
-    total_size = 0
-    for ext in ['.safetensors', '.bin', '.pt']:
-        for f in sorted(path.glob(f'*{ext}')):
-            try:
-                sz = os.path.getsize(f) / (1024 * 1024)
-                weight_files.append({'name': f.name, 'size_mib': round(sz, 1)})
-                total_size += sz
-            except OSError:
-                pass
-
-    # Check for Mirai S (vllm subdirectory with plugin wheel)
-    mirai_s = False
-    vllm_dir = path / 'vllm'
-    if vllm_dir.is_dir() and vllm_dir.exists():
-        plugin_wheels = list(vllm_dir.glob('mirai_s-*.whl'))
-        if plugin_wheels:
-            mirai_s = True
-            name = f'{name} (Mirai S)'
-
-    # Determine compatible backends
-    compatible = []
-    vllm_architectures = {
-        'qwen2', 'llama', 'mistral', 'mixtral', 'gemma', 'gemma2', 'phi3',
-        'phi', 'falcon', 'starcoder2', 'deepseek_v2', 'deepseek_v3', 'baichuan',
-        'internlm', 'command_r', 'dbrx', 'olmo', 'qwen2_moe', 'stablelm',
-        'cohere', 'nemotron', 'exaone', 'minicpm', 'opt', 'bloom',
-    }
-
-    # Only precise architectures — never assume breadth coverage
-    if arch.lower() in vllm_architectures:
-        compatible.append('vllm')
-    else:
-        compatible.append('llama.cpp')
-
-    recommended = 'vllm' if 'vllm' in compatible else 'llama.cpp'
-
-    if mirai_s:
-        compatible = ['vllm']
-        recommended = 'vllm'
-        plugin = 'Mirai S'
-    else:
-        plugin = 'None'
-
-    return {
-        'format': 'mirai_s' if mirai_s else 'hf',
-        'name': name,
-        'architecture': arch,
-        'parameters_b': params_b if params_b else round(total_size / 500, 1) if total_size else 0,
-        'quantization': quant,
-        'context_length': max_ctx,
-        'file_count': len(weight_files),
-        'file_sizes_mib': [f['size_mib'] for f in weight_files],
-        'total_size_mib': round(total_size, 1),
-        'compatible_backends': compatible,
-        'recommended_backend': recommended,
-        'plugin_supported': 'Mirai S' if mirai_s else None,
-        'reason': (
-            f'HuggingFace model: {arch}'
-            f'{", Mirai S plugin detected" if mirai_s else ""}'
-        ),
-    }
+def detect_gguf_shard(path):
+    """Detect and describe a sharded GGUF model (first shard)."""
+    result = detect_gguf(path)
+    if result:
+        result['format'] = 'gguf_shard'
+    return result
 
 
-def detect(path_str):
-    """Detect model format from the given path."""
+def detect_file(path_str):
+    """Detect model format from the given file path."""
     path = Path(path_str)
 
     if not path.exists():
@@ -214,41 +266,31 @@ def detect(path_str):
         result = detect_gguf(str(path))
         if result:
             return result
-        return {'format': 'gguf', 'reason': 'GGUF file detected but metadata unreadable'}
+        return {'format': 'gguf', 'codec': 'Unknown', 'reason': 'GGUF file detected but metadata unreadable'}
 
-    # Check for GGUF shard (first shard)
+    # Check for GGUF shard
     if path.is_file():
         m = re.match(r'(.+)-(\d{5})-of-(\d{5})\.gguf$', path.name, re.IGNORECASE)
         if m:
             result = detect_gguf(str(path))
             if result:
+                result['format'] = 'gguf_shard'
                 return result
             return {'format': 'gguf_shard', 'reason': f'GGUF shard: {m.group(2)} of {m.group(3)}'}
 
-    # Check for directory (HuggingFace / Mirai S)
-    if path.is_dir():
-        result = detect_hf_directory(path)
-        if result:
-            return result
+    if path.is_file():
+        ext = path.suffix.lower()
+        return {'format': 'unknown_file', 'reason': f'Unrecognized file: {ext}'}
 
-        # Check for GGUF files inside directory
+    if path.is_dir():
         gguf_files = list(path.glob('*.gguf'))
         if gguf_files:
-            # Detect first GGUF
             result = detect_gguf(str(gguf_files[0]))
             if result:
                 result['file_count'] = len(gguf_files)
                 return result
-            return {'format': 'gguf_dir', 'reason': f'Directory containing {len(gguf_files)} GGUF file(s)'}
-
-        return {'format': 'unknown_dir', 'reason': 'Directory does not contain recognized model files'}
-
-    if path.is_file():
-        ext = path.suffix.lower()
-        if ext in ('.bin', '.pt', '.safetensors', '.pth'):
-            return {'format': 'weight_file', 'reason': f'Standalone weight file ({ext}). Needs a directory with config.json.'}
-
-        return {'format': 'unknown_file', 'reason': f'Unrecognized file type: {ext}'}
+            return {'format': 'gguf_dir', 'reason': f'Directory with {len(gguf_files)} GGUF file(s)'}
+        return {'format': 'unknown_dir', 'reason': 'No GGUF files in directory'}
 
     return {'format': 'unknown', 'reason': 'Could not determine model format'}
 
@@ -259,7 +301,7 @@ def main():
         sys.exit(1)
 
     path = sys.argv[1]
-    result = detect(path)
+    result = detect_file(path)
     json.dump(result, sys.stdout, indent=2)
     print()
 

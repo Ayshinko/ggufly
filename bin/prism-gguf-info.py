@@ -64,12 +64,23 @@ def inspect(path):
         for _ in range(count):
             key = string()
             item = value(number('I'))
-            if key in ('general.file_type', 'general.name', 'general.architecture', 'split.count', 'split.no') or key.endswith('.context_length'):
+            if key in ('general.file_type', 'general.name', 'general.architecture', 'split.count', 'split.no', 'mirai.version') or key.endswith('.context_length') or key.startswith('mirai.'):
                 metadata[key] = item
         ftype = metadata.get('general.file_type')
         if ftype is not None and (type(ftype) is not int or ftype < 0):
             raise ValueError('general.file_type must be a nonnegative integer')
         metadata['quantization'] = QUANTIZATIONS.get(ftype, f'Unknown ({ftype})')
+
+        # Detect Mirai GGUF from metadata
+        if metadata.get('mirai.version') is not None:
+            metadata['format'] = 'mirai_s_gguf'
+        # Also detect from tensor names if metadata not present - fall back to filename hints
+        elif ftype in (36, 37, 38, 39):
+            # TQ1_0, TQ2_0 etc may be Mirai
+            pass
+        else:
+            metadata['format'] = 'gguf'
+
         return metadata
 
 

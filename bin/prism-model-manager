@@ -6,43 +6,17 @@ VERSION=4.0.0
 
 # ── Color support ─────────────────────────────────
 if [ -n "${NO_COLOR:-}" ] || ! [ -t 1 ]; then
-    C_RESET=""
-    C_BOLD=""
-    C_DIM=""
-    C_CYAN=""
-    C_GREEN=""
-    C_YELLOW=""
-    C_RED=""
-    C_MAGENTA=""
-    C_GRAY=""
-    C_BLUE=""
-    C_WHITE=""
+    C_RESET="" C_BOLD="" C_DIM="" C_CYAN="" C_GREEN="" C_YELLOW="" C_RED="" C_MAGENTA="" C_GRAY="" C_BLUE="" C_WHITE=""
 else
-    # Detect truecolor support (COLORTERM=truecolor or 24-bit)
     if [[ "${COLORTERM:-}" =~ (truecolor|24bit) ]] || [[ "$TERM" == *-direct ]]; then
-        C_RESET="\e[0m"
-        C_BOLD="\e[1m"
-        C_DIM="\e[2m"
-        C_CYAN="\e[38;2;0;200;255m"
-        C_GREEN="\e[38;2;0;220;130m"
-        C_YELLOW="\e[38;2;255;200;50m"
-        C_RED="\e[38;2;255;80;80m"
-        C_MAGENTA="\e[38;2;200;100;255m"
-        C_GRAY="\e[38;2;140;140;150m"
-        C_BLUE="\e[38;2;80;160;255m"
-        C_WHITE="\e[38;2;220;220;225m"
+        C_RESET="\e[0m" C_BOLD="\e[1m" C_DIM="\e[2m"
+        C_CYAN="\e[38;2;0;200;255m" C_GREEN="\e[38;2;0;220;130m" C_YELLOW="\e[38;2;255;200;50m"
+        C_RED="\e[38;2;255;80;80m" C_MAGENTA="\e[38;2;200;100;255m" C_GRAY="\e[38;2;140;140;150m"
+        C_BLUE="\e[38;2;80;160;255m" C_WHITE="\e[38;2;220;220;225m"
     else
-        C_RESET="\e[0m"
-        C_BOLD="\e[1m"
-        C_DIM="\e[2m"
-        C_CYAN="\e[36m"
-        C_GREEN="\e[32m"
-        C_YELLOW="\e[33m"
-        C_RED="\e[31m"
-        C_MAGENTA="\e[35m"
-        C_GRAY="\e[90m"
-        C_BLUE="\e[34m"
-        C_WHITE="\e[97m"
+        C_RESET="\e[0m" C_BOLD="\e[1m" C_DIM="\e[2m"
+        C_CYAN="\e[36m" C_GREEN="\e[32m" C_YELLOW="\e[33m" C_RED="\e[31m"
+        C_MAGENTA="\e[35m" C_GRAY="\e[90m" C_BLUE="\e[34m" C_WHITE="\e[97m"
     fi
 fi
 
@@ -54,11 +28,7 @@ TERM_COLS="${TERM_COLS:-80}"
 TERM_ROWS="${TERM_ROWS:-24}"
 
 # ── Styled helpers ────────────────────────────────
-style() {
-    local color="$1" text="$2" bold=
-    [ "${3:-}" = bold ] && bold="$C_BOLD"
-    printf '%b%s%b' "$bold$color" "$text" "$C_RESET"
-}
+style() { local color="$1" text="$2" bold=; [ "${3:-}" = bold ] && bold="$C_BOLD"; printf '%b%s%b' "$bold$color" "$text" "$C_RESET"; }
 
 status_color() {
     local status="$1"
@@ -66,29 +36,26 @@ status_color() {
         *RUNNING*|*READY*|*succeeded*)   printf '%s' "$C_GREEN" ;;
         *LOADING*|*UNHEALTHY*)           printf '%s' "$C_CYAN" ;;
         *STOPPED*|*STALE*|*no\ healthy*) printf '%s' "$C_GRAY"  ;;
-        *EXTERNAL*)                      printf '%s' "$C_YELLOW" ;;
-        *WARNING*|*failed*)              printf '%s' "$C_YELLOW" ;;
+        *EXTERNAL*|*WARNING*|*failed*)   printf '%s' "$C_YELLOW" ;;
+        installed:*|*installed*)         printf '%s' "$C_GREEN" ;;
+        *missing*|*not*)                 printf '%s' "$C_YELLOW" ;;
         *ERROR*)                         printf '%s' "$C_RED" ;;
         *)                               printf '%s' "$C_WHITE" ;;
     esac
 }
 
 colored_status() {
-    local status="$1"
-    local color
+    local status="$1" color
     color=$(status_color "$status")
     printf '%b%s%b' "$color$C_BOLD" "$status" "$C_RESET"
 }
 
 sep() {
     local cols="${1:-$TERM_COLS}"
-
-    # Ensure TERM_COLS is valid; fallback to 80
     cols="${cols:-80}"
     if ! [[ "$cols" =~ ^[0-9]+$ ]]; then cols=80; fi
     [ "$cols" -gt 120 ] && cols=120
     [ "$cols" -lt 8 ] && cols=80
-
     local character='-' line
     case "${LC_ALL:-${LC_CTYPE:-${LANG:-C}}}" in
         *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) character='━' ;;
@@ -97,6 +64,7 @@ sep() {
     printf '%s\n' "${line// /$character}"
 }
 
+# ── Paths ────────────────────────────────────────
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/prism-model-manager"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/prism-model-manager"
 MODEL_PROFILE_DIR="$CONFIG_DIR/model-profiles"
@@ -109,12 +77,14 @@ mkdir -p "$CONFIG_DIR" "$STATE_DIR" "$MODEL_PROFILE_DIR"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 BACKENDS_DIR="$DATA_HOME/prism-model-manager/backends"
 
-# ─────────────────────────────────────────────
-# Defaults
-# ─────────────────────────────────────────────
+# ── Script references ──────────────────────────
+SCRIPT_DIR=$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+RUNTIME_REGISTRY="$SCRIPT_DIR/prism-runtime-registry.sh"
+BACKEND_MANAGER="$SCRIPT_DIR/prism-backend-manager"
+MODEL_DETECT_PY="$SCRIPT_DIR/prism-model-detect.py"
 
-MODEL_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/prism-model-manager/models"
-PRISM_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/prism-llama"
+# ── Default settings ──────────────────────────
+MODEL_ROOT="/mnt/Storage/Model"
 SERVER_BIN=""
 BENCH_BIN=""
 
@@ -124,7 +94,6 @@ PORT="8080"
 CTX="4096"
 NGL="99"
 FLASH="on"
-
 BATCH="512"
 UBATCH="128"
 PARALLEL="1"
@@ -153,17 +122,19 @@ LORA_SCALE="2"
 LORA_PATH=""
 
 CURRENT_MODEL=""
+RUNTIME_ID=""        # Persisted runtime selection per model
+RUNTIME_RECOMMENDED="" # Read-only recommendation
 
-valid_model_len_scalar() {
-    [[ "$1" == -1 || "$1" == auto || "$1" =~ ^[1-9][0-9]*$ ]]
-}
+# ── Source runtime registry ──────────────────────
+if [ -x "$RUNTIME_REGISTRY" ]; then
+    source "$RUNTIME_REGISTRY"
+    runtime_registry_init_builtin 2>/dev/null || true
+fi
 
-# One input boundary for every editable scalar. Never commit failed/help output.
+# ── Input handling ────────────────────────────
 valid_input_value() {
     local name="$1" value="$2"
-    [[ "$value" != *$'\n'* && "$value" != *$'\r'* &&
-       "$value" != *'Usage:'* && "$value" != *'Prompt for some input'* &&
-       "$value" != *'Flags:'* ]] || return 1
+    [[ "$value" != *$'\n'* && "$value" != *$'\r'* && "$value" != *'Usage:'* && "$value" != *'Prompt for some input'* && "$value" != *'Flags:'* ]] || return 1
     case "$name" in
         REASONING_BUDGET|MAX_OUTPUT_TOKENS) [[ "$value" =~ ^-?[0-9]+$ ]] ;;
         *) return 0 ;;
@@ -173,7 +144,6 @@ valid_input_value() {
 edit_input() {
     local name="$1" value
     shift
-    # gum renders its interactive UI on stderr; keep it attached to the terminal.
     if value=$(gum input "$@"); then
         if valid_input_value "$name" "$value"; then
             printf -v "$name" '%s' "$value"
@@ -186,29 +156,25 @@ edit_input() {
 }
 
 sanitize_settings() {
+    # Track which canonical fields exist in the config file
+    # so legacy SPEC migration does NOT overwrite explicitly-set values.
+    if [ $# -ge 1 ] && [ -n "$1" ] && [ -f "$1" ]; then
+        CONFIG_HAS_MTP=0; CONFIG_HAS_MTP_MODE=0; CONFIG_HAS_MTP_DRAFT_MAX=0
+        while IFS='=' read -r key rest; do
+            case "$key" in
+                MTP) CONFIG_HAS_MTP=1 ;;
+                MTP_MODE) CONFIG_HAS_MTP_MODE=1 ;;
+                MTP_DRAFT_MAX) CONFIG_HAS_MTP_DRAFT_MAX=1 ;;
+            esac
+        done < "$1"
+    fi
     return 0
 }
 
-# Config is trusted Bash, written with shell escaping. Never source untrusted files.
-# shellcheck disable=SC1090
+# ── Config loading ────────────────────────────
 CONFIG_LOADED=0
-CONFIG_HAS_MODEL_ROOT=0
-CONFIG_HAS_PRISM_ROOT=0
-CONFIG_HAS_SERVER_BIN=0
-CONFIG_HAS_BENCH_BIN=0
-CONFIG_HAS_MTP=0
-CONFIG_HAS_MTP_MODE=0
-CONFIG_HAS_MTP_DRAFT_MAX=0
 if [ -f "$CONFIG" ]; then
     CONFIG_LOADED=1
-    grep -Eq '^[[:space:]]*(export[[:space:]]+)?MODEL_ROOT[[:space:]]*=' "$CONFIG" && CONFIG_HAS_MODEL_ROOT=1
-    grep -Eq '^[[:space:]]*(export[[:space:]]+)?PRISM_ROOT[[:space:]]*=' "$CONFIG" && CONFIG_HAS_PRISM_ROOT=1
-    grep -Eq '^[[:space:]]*(export[[:space:]]+)?SERVER_BIN[[:space:]]*=' "$CONFIG" && CONFIG_HAS_SERVER_BIN=1
-    grep -Eq '^[[:space:]]*(export[[:space:]]+)?BENCH_BIN[[:space:]]*=' "$CONFIG" && CONFIG_HAS_BENCH_BIN=1
-    grep -Eq '^[[:space:]]*(export[[:space:]]+)?MTP[[:space:]]*=' "$CONFIG" && CONFIG_HAS_MTP=1
-    grep -Eq '^[[:space:]]*(export[[:space:]]+)?MTP_MODE[[:space:]]*=' "$CONFIG" && CONFIG_HAS_MTP_MODE=1
-    grep -Eq '^[[:space:]]*(export[[:space:]]+)?MTP_DRAFT_MAX[[:space:]]*=' "$CONFIG" && CONFIG_HAS_MTP_DRAFT_MAX=1
-    # Strip obsolete vLLM/Mirai settings before sourcing
     _pmm_tmp=$(mktemp 2>/dev/null) || true
     if [ -n "$_pmm_tmp" ]; then
         grep -vE '^(export[[:space:]]+)?(VLLM_|MIRAI_|BACKEND=|PLUGIN=|PLUGIN_DIR=|PMM_PLUGIN_)' "$CONFIG" > "$_pmm_tmp" 2>/dev/null || true
@@ -219,110 +185,244 @@ if [ -f "$CONFIG" ]; then
     fi
     sanitize_settings "$CONFIG"
 fi
+
 SAVED_MODEL_ROOT="$MODEL_ROOT"
-SAVED_PRISM_ROOT="$PRISM_ROOT"
-SAVED_SERVER_BIN="$SERVER_BIN"
-SAVED_BENCH_BIN="$BENCH_BIN"
 MODEL_ROOT="${PMM_MODEL_ROOT:-$MODEL_ROOT}"
-PRISM_ROOT="${PMM_PRISM_ROOT:-$PRISM_ROOT}"
 SERVER_BIN="${PMM_SERVER_BIN:-$SERVER_BIN}"
 BENCH_BIN="${PMM_BENCH_BIN:-$BENCH_BIN}"
 
-# Migrate legacy SPEC_* settings only when their canonical counterpart was not
-# explicitly saved. SPEC_DRAFT_MODEL has no canonical sidecar path because 3.0
-# supports embedded MTP only; it enables embedded MTP while retaining a warning.
-if [ -n "${SPEC_MODE:-}" ] && [ "$CONFIG_HAS_MTP_MODE" -eq 0 ]; then
-    MTP_MODE="$SPEC_MODE"
-fi
-if [ -n "${SPEC_MODE:-}" ] && [ "$CONFIG_HAS_MTP" -eq 0 ]; then
-    MTP=on
-fi
-if [ -n "${SPEC_DRAFT_MODEL:-}" ] && [ "$CONFIG_HAS_MTP" -eq 0 ]; then
-    MTP=on
-fi
-if [ -n "${SPEC_DRAFT_TOKENS:-}" ] && [ "$CONFIG_HAS_MTP_DRAFT_MAX" -eq 0 ]; then
-    MTP_DRAFT_MAX="$SPEC_DRAFT_TOKENS"
-fi
+# Legacy SPEC migration (preserved from v3.x)
+if [ -n "${SPEC_MODE:-}" ] && [ "${CONFIG_HAS_MTP_MODE:-0}" -eq 0 ]; then MTP_MODE="$SPEC_MODE"; fi
+if [ -n "${SPEC_MODE:-}" ] && [ "${CONFIG_HAS_MTP:-0}" -eq 0 ]; then MTP=on; fi
+if [ -n "${SPEC_DRAFT_MODEL:-}" ] && [ "${CONFIG_HAS_MTP:-0}" -eq 0 ]; then MTP=on; fi
+if [ -n "${SPEC_DRAFT_TOKENS:-}" ] && [ "${CONFIG_HAS_MTP_DRAFT_MAX:-0}" -eq 0 ]; then MTP_DRAFT_MAX="$SPEC_DRAFT_TOKENS"; fi
 LEGACY_SPEC_DRAFT_MODEL_SET=0
 [ -n "${SPEC_DRAFT_MODEL:-}" ] && LEGACY_SPEC_DRAFT_MODEL_SET=1
 
-LLAMA_DIR="$BACKENDS_DIR/llama.cpp"
-
-for candidate in "$PRISM_ROOT/build-cuda/bin/llama-server" "$PRISM_ROOT/build/bin/llama-server" "$PRISM_ROOT/llama-server" "$LLAMA_DIR/llama-server"; do
-    if [ -z "$SERVER_BIN" ] && [ -x "$candidate" ]; then SERVER_BIN="$candidate"; fi
-done
-SERVER_BIN="${SERVER_BIN:-$(command -v llama-server || true)}"
-# If SERVER_BIN didn't resolve from PATH, check PMM-managed backend directory
-if [ -z "$SERVER_BIN" ] && [ -x "$LLAMA_DIR/llama-server" ]; then
-    SERVER_BIN="$LLAMA_DIR/llama-server"
+# Resolve SERVER_BIN from runtime if not set explicitly
+if [ -z "$SERVER_BIN" ] || [ ! -x "$SERVER_BIN" ]; then
+    if [ -n "$RUNTIME_ID" ] && [ -x "$RUNTIME_REGISTRY" ]; then
+        local runtime_bin
+        runtime_bin=$("$RUNTIME_REGISTRY" get "$RUNTIME_ID" "binary" 2>/dev/null || echo "")
+        if [ -n "$runtime_bin" ] && [ -x "$runtime_bin" ]; then
+            SERVER_BIN="$runtime_bin"
+        else
+            local runtime_folder
+            runtime_folder=$("$RUNTIME_REGISTRY" get "$RUNTIME_ID" "folder" 2>/dev/null || echo "")
+            if [ -n "$runtime_folder" ]; then
+                runtime_folder="${runtime_folder/#\~/$HOME}"
+                local discovered
+                discovered=$("$RUNTIME_REGISTRY" discover "$runtime_folder" 2>/dev/null | head -1) || true
+                [ -n "$discovered" ] && [ -x "$discovered" ] && SERVER_BIN="$discovered"
+            fi
+        fi
+    fi
 fi
+
+# Fallback: scan runtime managed directories
+if [ -z "$SERVER_BIN" ] || [ ! -x "$SERVER_BIN" ]; then
+    for candidate in "$BACKENDS_DIR/llama.cpp"/*/current/bin/llama-server "$BACKENDS_DIR/llama.cpp"/*/bin/llama-server; do
+        if [ -x "$candidate" ]; then
+            SERVER_BIN="$candidate"
+            break
+        fi
+    done
+fi
+
+SERVER_BIN="${SERVER_BIN:-$(command -v llama-server || true)}"
 BENCH_BIN="${BENCH_BIN:-${SERVER_BIN%/*}/llama-bench}"
 
-SCORE_BIN="${PMM_SCORE_BIN:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/prism-lora-ab-score.py}"
-BACKEND_MANAGER="${PMM_BACKEND_MANAGER:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/prism-backend-manager}"
-MODEL_DETECT_PY="${PMM_MODEL_DETECT_PY:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/prism-model-detect.py}"
-
-
-# Defaults used the first time a model is loaded.
+# ── Runtime defaults ──────────────────────────
 capture_runtime_defaults() {
-    DEFAULT_CTX="$CTX"
-    DEFAULT_NGL="$NGL"
-    DEFAULT_FLASH="$FLASH"
-    DEFAULT_BATCH="$BATCH"
-    DEFAULT_UBATCH="$UBATCH"
-    DEFAULT_PARALLEL="$PARALLEL"
-    DEFAULT_TEMP="$TEMP"
-    DEFAULT_TOP_P="$TOP_P"
-    DEFAULT_TOP_K="$TOP_K"
-    DEFAULT_MIN_P="$MIN_P"
-    DEFAULT_CACHE_K="$CACHE_K"
-    DEFAULT_CACHE_V="$CACHE_V"
-    DEFAULT_REASONING_BUDGET="$REASONING_BUDGET"
-    DEFAULT_MAX_OUTPUT_TOKENS="$MAX_OUTPUT_TOKENS"
-    DEFAULT_VISION="$VISION"
-    DEFAULT_MMPROJ_PATH="$MMPROJ_PATH"
-    DEFAULT_MTP="$MTP"
-    DEFAULT_MTP_MODE="$MTP_MODE"
-    DEFAULT_MTP_DRAFT_MAX="$MTP_DRAFT_MAX"
-    DEFAULT_MTP_DRAFT_FLAG="$MTP_DRAFT_FLAG"
-    DEFAULT_LORA_ENABLED="$LORA_ENABLED"
-    DEFAULT_LORA_SCALE="$LORA_SCALE"
-    DEFAULT_LORA_PATH="$LORA_PATH"
+    DEFAULT_CTX="$CTX" DEFAULT_NGL="$NGL" DEFAULT_FLASH="$FLASH"
+    DEFAULT_BATCH="$BATCH" DEFAULT_UBATCH="$UBATCH" DEFAULT_PARALLEL="$PARALLEL"
+    DEFAULT_TEMP="$TEMP" DEFAULT_TOP_P="$TOP_P" DEFAULT_TOP_K="$TOP_K" DEFAULT_MIN_P="$MIN_P"
+    DEFAULT_CACHE_K="$CACHE_K" DEFAULT_CACHE_V="$CACHE_V"
+    DEFAULT_REASONING_BUDGET="$REASONING_BUDGET" DEFAULT_MAX_OUTPUT_TOKENS="$MAX_OUTPUT_TOKENS"
+    DEFAULT_VISION="$VISION" DEFAULT_MMPROJ_PATH="$MMPROJ_PATH"
+    DEFAULT_MTP="$MTP" DEFAULT_MTP_MODE="$MTP_MODE" DEFAULT_MTP_DRAFT_MAX="$MTP_DRAFT_MAX" DEFAULT_MTP_DRAFT_FLAG="$MTP_DRAFT_FLAG"
+    DEFAULT_LORA_ENABLED="$LORA_ENABLED" DEFAULT_LORA_SCALE="$LORA_SCALE" DEFAULT_LORA_PATH="$LORA_PATH"
+    DEFAULT_RUNTIME_ID="$RUNTIME_ID"
 }
 capture_runtime_defaults
 
-
-
-
+# ── Model scanning ────────────────────────────
 scan_models() {
     [ -d "$MODEL_ROOT" ] || { echo "Model directory not found: $MODEL_ROOT" >&2; return 1; }
-    # Scan GGUF models
     find -L "$MODEL_ROOT" -type f -iname '*.gguf' ! -iname '*mmproj*' ! -iname '*lora*' ! -iname '*kv-bias*' ! -iname '*dspark*' | sort | while IFS= read -r model; do
         if [[ "$model" =~ -([0-9]{5})-of-([0-9]{5})\.[gG][gG][uU][fF]$ ]] && [ "${BASH_REMATCH[1]}" != 00001 ]; then continue; fi
         printf '%s\n' "$model"
     done
 }
 
-model_info() {
-    local metadata ftype origin="filename hint"
-    local name="${1^^}" format=Unknown requirement="Unknown; consult the model card"
-
-    case "$name" in
-        *PTQ1_0*) format=PTQ1_0; requirement="Prism fork required" ;;
-        *PQ2_0*) format=PQ2_0; requirement="Prism fork required" ;;
-        *Q2_0*|*Q2_G64*) format=Q2_0; requirement="Generation/layout dependent: legacy group-128 needs old fork; official group-64 can use mainline; Bonsai 2 requires Prism fork" ;;
-        *Q1_0*) format=Q1_0; requirement="Version/layout dependent; verify model card and runtime" ;;
-    esac
-    if metadata=$(python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/prism-gguf-info.py" "$1" 2>/dev/null); then
-        ftype=$(jq -r '."general.file_type" // empty' <<< "$metadata")
-        format=$(jq -r '.quantization // "Unknown"' <<< "$metadata")
-        origin="GGUF metadata, file_type=${ftype:-unset}"
-        requirement="Verify the model card and selected backend; metadata is not a compatibility guarantee"
-        echo "$metadata" | jq -r '"Name: \(."general.name" // "unknown") | Architecture: \(."general.architecture" // "unknown")"'
-
+# ── Codec detection ──────────────────────────
+model_detect() {
+    local path="$1"
+    if [ -z "$path" ] || [ ! -e "$path" ]; then
+        echo '{}'
+        return
     fi
-    echo "Format ($origin): $format | $requirement"
-    echo "Filename hints cannot verify renamed GGUFs or runtime compatibility."
+    python3 "$MODEL_DETECT_PY" "$path" 2>/dev/null || echo '{}'
+}
+
+model_detect_key() {
+    local path="$1" key="$2"
+    model_detect "$path" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('$key', '') or '')
+except: print('')
+" 2>/dev/null || echo ''
+}
+
+model_codec() {
+    model_detect_key "$1" "codec"
+}
+
+model_format_str() {
+    local path="$1"
+    model_detect_key "$path" "format"
+}
+
+model_architecture() {
+    model_detect_key "$1" "architecture"
+}
+
+# ── Runtime management helpers ────────────────
+runtime_registry_get() {
+    local id="$1" key="${2:-}"
+    if [ -x "$RUNTIME_REGISTRY" ]; then
+        if [ -n "$key" ]; then
+            "$RUNTIME_REGISTRY" get "$id" "$key" 2>/dev/null || return 1
+        else
+            "$RUNTIME_REGISTRY" get "$id" 2>/dev/null || return 1
+        fi
+    fi
+}
+
+runtime_registry_list() {
+    runtime_registry_list_ids 2>/dev/null || true
+}
+
+runtime_display_name() {
+    local id="$1"
+    local name
+    name=$(runtime_registry_get "$id" "display_name") || { echo "$id"; return 1; }
+    echo "$name"
+}
+
+runtime_folder_expanded() {
+    local id="$1"
+    local folder
+    folder=$(runtime_registry_get "$id" "folder") || return 1
+    folder="${folder/#\~/$HOME}"
+    readlink -f "$folder" 2>/dev/null || echo "$folder"
+}
+
+runtime_is_managed() {
+    runtime_registry_get "$1" "managed" | grep -q "true"
+}
+
+runtime_is_installed() {
+    local id="$1"
+    local binary_name
+    binary_name=$(runtime_registry_get "$id" "binary" 2>/dev/null || echo "")
+
+    if [ -n "$binary_name" ] && [ -x "$binary_name" ]; then
+        return 0
+    fi
+
+    local folder_expanded
+    folder_expanded=$(runtime_folder_expanded "$id" 2>/dev/null) || return 1
+    [ -d "$folder_expanded" ] || return 1
+
+    # Check for binary in standard locations
+    [ -x "$folder_expanded/bin/llama-server" ] && return 0
+    [ -x "$folder_expanded/llama-server" ] && return 0
+
+    # Check resolved symlink
+    local resolved
+    resolved=$(readlink -f "$folder_expanded" 2>/dev/null || echo "")
+    [ -n "$resolved" ] && [ -x "$resolved/bin/llama-server" ] && return 0
+
+    return 1
+}
+
+runtime_status_for_display() {
+    local id="$1"
+    local managed
+    managed=$(runtime_registry_get "$id" "managed" 2>/dev/null || echo "false")
+
+    if [ "$managed" = "true" ]; then
+        if runtime_is_installed "$id"; then
+            echo "Installed"
+        else
+            echo "Not installed"
+        fi
+    else
+        local folder
+        folder=$(runtime_folder_expanded "$id" 2>/dev/null) || { echo "Missing folder"; return 0; }
+        if [ -d "$folder" ]; then
+            echo "Available"
+        else
+            echo "Missing folder"
+        fi
+    fi
+}
+
+resolve_runtime_binary() {
+    local id="$1"
+
+    if [ -n "${PMM_SERVER_BIN:-}" ]; then
+        echo "$PMM_SERVER_BIN"
+        return 0
+    fi
+
+    local binary
+    binary=$(runtime_registry_get "$id" "binary" 2>/dev/null || echo "")
+    if [ -x "$binary" ]; then
+        echo "$binary"
+        return 0
+    fi
+
+    local folder
+    folder=$(runtime_folder_expanded "$id" 2>/dev/null) || return 1
+
+    local discovered
+    discovered=$("$RUNTIME_REGISTRY" discover "$folder" 2>/dev/null | head -1) || {
+        # Manually search
+        for candidate in "$folder/bin/llama-server" "$folder/build/bin/llama-server" "$folder/build/bin/Release/llama-server" "$folder/llama-server"; do
+            if [ -x "$candidate" ]; then
+                echo "$candidate"
+                return 0
+            fi
+        done
+        return 1
+    }
+
+    if [ -x "$discovered" ]; then
+        echo "$discovered"
+        return 0
+    fi
+
+    return 1
+}
+
+# ── Information helpers ──────────────────────
+model_info() {
+    local path="$1"
+    local codec arch name
+    codec=$(model_codec "$path")
+    arch=$(model_architecture "$path")
+    name=$(model_detect_key "$path" "name")
+
+    if [ -n "$name" ] && [ "$name" != "$(basename "$path")" ]; then
+        echo "Name: $name"
+    fi
+    echo "Architecture: ${arch:-unknown}"
+    echo "Codec: ${codec:-Unknown}"
+    echo "File: $(basename "$path")"
 }
 
 gpu_info() {
@@ -341,112 +441,14 @@ gpu_info() {
             *) architecture=Unknown ;;
         esac
         printf '%s | compute %s | %s\n' "$name" "$capability" "$architecture"
-        [ "$architecture" != Ada ] || echo "Ada: prefer PTQ1_0 for Bonsai 2; benchmark for your workload."
     done <<< "$rows"
 }
 
-# ── Backend selection ──────────────────
+# ── Backend resolution (always llama.cpp) ──
+resolve_backend() { printf 'llama.cpp\n'; }
+backend_plugin_compatible() { return 0; }
 
-resolve_backend() {
-    # Always returns llama.cpp
-    printf 'llama.cpp\n'
-}
-
-resolve_plugin() {
-    # Always returns None
-    printf 'None\n'
-}
-
-runtime_model_path() {
-    # Identity function: return the path as-is
-    printf '%s\n' "$1"
-}
-
-backend_plugin_compatible() {
-    # Always compatible
-    return 0
-}
-
-# ── Model format detection ────────────────────
-
-model_format() {
-    local path="$1"
-    if [ -z "$path" ] || [ ! -e "$path" ]; then
-        echo '{"format":"unknown"}'
-        return
-    fi
-    python3 "$MODEL_DETECT_PY" "$path" 2>/dev/null || echo '{"format":"unknown","reason":"detection failed"}'
-}
-
-model_format_key() {
-    local path="$1" key="$2"
-    model_format "$path" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    print(d.get('$key', '') or '')
-except: print('')
-" 2>/dev/null || echo ''
-}
-
-ensure_backend() {
-    local backend="$1"
-
-    # Only shortcut with SERVER_BIN for llama.cpp backend
-    if [ "$backend" = "llama.cpp" ]; then
-        if [ -n "${PMM_SERVER_BIN:-}" ] && [ -x "${PMM_SERVER_BIN:-}" ]; then
-            return 0
-        fi
-        if [ -x "$SERVER_BIN" ]; then
-            return 0
-        fi
-    fi
-
-    local status
-    status=$("$BACKEND_MANAGER" status "$backend" 2>/dev/null || echo "not_installed")
-
-    # Non-interactive: skip auto-install, let preflight give the real error
-    if ! [ -t 0 ] || ! [ -t 1 ]; then
-        case "$status" in
-            installed:*) return 0 ;;
-            *)
-                echo "(non-interactive: backend '$backend' not installed)" >&2
-                return 0  # Continue to preflight for real error
-                ;;
-        esac
-    fi
-
-    case "$status" in
-        installed:*)
-            return 0
-            ;;
-        *)
-            echo ""
-            echo "Required backend '$backend' is not installed."
-            echo "Download and install it now?"
-            echo ""
-            if ! gum confirm "Install $backend?"; then
-                echo "Installation cancelled by user."
-                return 1
-            fi
-            echo ""
-            echo "Installing $backend..."
-            echo ""
-            "$BACKEND_MANAGER" install "$backend" 2>&1 || {
-                local result=$?
-                echo ""
-                echo "ERROR: $backend installation failed."
-                echo "Check the output above for details."
-                echo "You can retry: prism-backend-manager install $backend"
-                return "$result"
-            }
-            echo ""
-            echo "$backend installed successfully."
-            return 0
-            ;;
-    esac
-}
-
+# ── Validate settings ────────────────────────
 validate_settings() {
     python3 - "$CTX" "$NGL" "$BATCH" "$UBATCH" "$PARALLEL" "$PORT" "$TEMP" "$TOP_P" "$TOP_K" "$MIN_P" "$REASONING_BUDGET" "$MAX_OUTPUT_TOKENS" "$LORA_SCALE" "$MTP_DRAFT_MAX" "$STARTUP_TIMEOUT" <<'PY' || return 1
 import math, re, sys
@@ -474,16 +476,7 @@ except ValueError as exc:
     print(f'Invalid settings: {exc}', file=sys.stderr)
     sys.exit(1)
 PY
-    local effective_backend
-    effective_backend=$(resolve_backend "$CURRENT_MODEL")
-    local effective_plugin
-    effective_plugin=$(resolve_plugin "$CURRENT_MODEL")
-
-    # Common validation
-    [ -n "$HOST" ] && [[ "$HOST" != *[[:space:]/]* ]] || { echo "HOST must be a hostname or IP address without a URL scheme." >&2; return 1; }
-
-    # llama.cpp-specific validation
-    local field
+    [ -n "$HOST" ] && [[ "$HOST" != *[[:space:]/]* ]] || { echo "HOST must be a hostname or IP address." >&2; return 1; }
     for field in VISION MTP LORA_ENABLED; do
         [[ "${!field}" =~ ^(on|off)$ ]] || { echo "Invalid $field: use on/off." >&2; return 1; }
     done
@@ -492,14 +485,14 @@ PY
         [[ "${!field}" =~ ^(f32|f16|bf16|q8_0|q4_0|q4_1|q5_0|q5_1|iq4_nl)$ ]] || { echo "Invalid $field cache type." >&2; return 1; }
     done
     [[ "$MTP_DRAFT_FLAG" =~ ^--(draft-max|spec-draft-n-max)$ ]] || { echo "Invalid MTP draft flag." >&2; return 1; }
-    [[ "$MTP_MODE" =~ ^(mtp|draft-mtp)$ ]] || { echo "MTP mode must be mtp or draft-mtp, as advertised by your backend." >&2; return 1; }
+    [[ "$MTP_MODE" =~ ^(mtp|draft-mtp)$ ]] || { echo "MTP mode must be mtp or draft-mtp." >&2; return 1; }
     if [ "$LORA_ENABLED" = on ] && [ ! -r "$LORA_PATH" ]; then echo "LoRA file not readable: $LORA_PATH" >&2; return 1; fi
 }
 
-api_base() (
+# ── Server lifecycle ─────────────────────────
+api_base() {
     local RUN_HOST="$HOST" RUN_PORT="$PORT" RUN_MODEL=""
     if server_pid >/dev/null && [ -f "$STATE_DIR/runtime.env" ]; then
-        # shellcheck disable=SC1091
         source "$STATE_DIR/runtime.env"
     fi
     case "$RUN_HOST" in
@@ -508,7 +501,7 @@ api_base() (
     esac
     [[ "$RUN_HOST" != *:* ]] || RUN_HOST="[$RUN_HOST]"
     printf 'http://%s:%s' "$RUN_HOST" "$RUN_PORT"
-)
+}
 
 port_available() {
     python3 - "$HOST" "$PORT" <<'PY'
@@ -520,7 +513,7 @@ try:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(address)
 except (OSError, ValueError) as exc:
-    print(f'Cannot bind {sys.argv[1]}:{sys.argv[2]}: {exc}. Choose another host/port; no process was stopped.', file=sys.stderr)
+    print(f'Cannot bind {sys.argv[1]}:{sys.argv[2]}: {exc}.', file=sys.stderr)
     sys.exit(1)
 PY
 }
@@ -530,12 +523,11 @@ backend_supports() {
 }
 
 preflight() {
-    [ -e "$CURRENT_MODEL" ] || { echo "Model file or directory missing: $CURRENT_MODEL" >&2; return 1; }
+    [ -e "$CURRENT_MODEL" ] || { echo "Model file missing: $CURRENT_MODEL" >&2; return 1; }
     validate_settings || return 1
 
-    # llama.cpp preflight
-    [ -x "$SERVER_BIN" ] || { echo "Set PMM_SERVER_BIN to an executable llama-server." >&2; return 1; }
-    python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/prism-gguf-info.py" "$CURRENT_MODEL" >/dev/null || return 1
+    [ -x "$SERVER_BIN" ] || { echo "Set PMM_SERVER_BIN or select a runtime with a valid llama-server." >&2; return 1; }
+    python3 "$SCRIPT_DIR/prism-gguf-info.py" "$CURRENT_MODEL" >/dev/null || return 1
     python3 - "$CURRENT_MODEL" <<'CHECK' || return 1
 import pathlib, re, sys
 p = pathlib.Path(sys.argv[1])
@@ -548,18 +540,18 @@ if m:
         shard = p.with_name(f'{m[1]}-{i:05d}-of-{count:05d}{m[4]}')
         if not shard.is_file(): sys.exit(f'Missing GGUF shard: {shard.name}')
 CHECK
+
     local BACKEND_HELP BACKEND_OPTIONS
     BACKEND_HELP=$(timeout 10 "$SERVER_BIN" --help 2>&1) || { echo "Backend --help failed or timed out: $SERVER_BIN" >&2; printf '%s\n' "$BACKEND_HELP" | tail -8 >&2; return 1; }
-    BACKEND_OPTIONS=$(python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/prism-backend-info.py" <<< "$BACKEND_HELP") || {
+    BACKEND_OPTIONS=$(python3 "$SCRIPT_DIR/prism-backend-info.py" <<< "$BACKEND_HELP") || {
         echo "Unable to parse backend help." >&2; return 1;
     }
-    local flag
     for flag in -m --host --port -ngl -fa -c -b -ub -np -n --temp --top-p --top-k --min-p --cache-type-k --cache-type-v --jinja; do
-        backend_supports "$flag" || { echo "Backend does not advertise $flag; choose a compatible existing build." >&2; return 1; }
+        backend_supports "$flag" || { echo "Backend does not advertise $flag." >&2; return 1; }
     done
     if [ "$VISION" = on ]; then
         if [ -n "$MMPROJ_PATH" ]; then
-            backend_supports --mmproj || { echo "Backend does not advertise vision --mmproj support." >&2; return 1; }
+            backend_supports --mmproj || { echo "Backend lacks --mmproj." >&2; return 1; }
             VISION_ARG_MODE="path"
         elif backend_supports --mmproj-auto; then
             VISION_ARG_MODE="auto"
@@ -567,30 +559,28 @@ CHECK
             find_mmproj >/dev/null || return 1
             VISION_ARG_MODE="path"
         else
-            echo "Backend does not advertise --mmproj-auto or --mmproj support." >&2
-            return 1
+            echo "Backend lacks --mmproj." >&2; return 1
         fi
     fi
     if [ "$MTP" = on ]; then
         if jq -e --arg flag "$MTP_DRAFT_FLAG" '.[$flag].removed == true' <<< "$BACKEND_OPTIONS" >/dev/null; then
-            echo "Backend marks $MTP_DRAFT_FLAG as removed. Its description:" >&2
+            echo "Backend marks $MTP_DRAFT_FLAG as removed." >&2
             jq -r --arg flag "$MTP_DRAFT_FLAG" '.[$flag].description' <<< "$BACKEND_OPTIONS" >&2
             return 1
         fi
         if ! backend_supports --spec-type || ! backend_supports "$MTP_DRAFT_FLAG"; then
-            echo "Backend does not advertise --spec-type and $MTP_DRAFT_FLAG. Check the selected executable's --help." >&2
+            echo "Backend lacks --spec-type and $MTP_DRAFT_FLAG." >&2
             return 1
         fi
         if ! jq -e --arg mode "$MTP_MODE" '."--spec-type".values | index($mode) != null' <<< "$BACKEND_OPTIONS" >/dev/null; then
-            echo "Unsupported MTP mode '$MTP_MODE'. Backend advertises: $(jq -r '."--spec-type".usage' <<< "$BACKEND_OPTIONS"). Set MTP mode in Model / Backend Settings." >&2
+            echo "Unsupported MTP mode '$MTP_MODE'." >&2
+            echo "Valid modes: mtp, draft-mtp" >&2
             return 1
         fi
     fi
-
     if [ "$MTP" = on ] && [ "$LEGACY_SPEC_DRAFT_MODEL_SET" -eq 1 ]; then
-        echo "Legacy SPEC_DRAFT_MODEL was migrated as embedded MTP; no sidecar draft model is used." >&2
+        echo "Legacy SPEC_DRAFT_MODEL migrated as embedded MTP." >&2
     fi
-
     if [ "$LORA_ENABLED" = on ]; then
         backend_supports --lora-scaled || { echo "Backend lacks --lora-scaled." >&2; return 1; }
     fi
@@ -600,72 +590,9 @@ CHECK
     build_command
 }
 
-runtime_status() {
-    if server_pid >/dev/null; then
-        if server_health; then echo 'RUNNING (managed)'; else echo 'LOADING / UNHEALTHY (managed; see logs)'; fi
-    elif server_health; then
-        echo 'EXTERNAL SERVER (not managed)'
-    else
-        echo 'STOPPED / no healthy API'
-    fi
-}
-
-runtime_state_status() {
-    if server_pid >/dev/null; then
-        echo "MANAGED: PID $(server_pid), verified by process start time and boot ID"
-        return 0
-    fi
-    if server_health; then
-        echo "EXTERNAL: healthy API at $(api_base), not managed by this process"
-        return 0
-    fi
-    if [ -e "$PIDFILE" ] || [ -e "$PIDFILE.start" ] || [ -e "$PIDFILE.boot" ] || [ -e "$STATE_DIR/runtime.env" ]; then
-        echo "STALE: runtime metadata is present, but no verified managed process or healthy API exists"
-        return 2
-    fi
-    echo "STOPPED: no managed process or runtime metadata"
-    return 0
-}
-
-clear_stale_state() {
-    if server_pid >/dev/null; then
-        echo "Refusing to clear metadata for a verified managed process." >&2
-        return 1
-    fi
-    if server_health; then
-        echo "Refusing to clear metadata while an external healthy API is present." >&2
-        return 1
-    fi
-    rm -f "$PIDFILE" "$PIDFILE.start" "$PIDFILE.boot" "$STATE_DIR/runtime.env"
-    echo "Cleared stale runtime metadata; no process was adopted or stopped."
-}
-
-memory_status() {
-    nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu --format=csv,noheader 2>/dev/null || echo 'NVIDIA usage unavailable (driver/tool missing).'
-    awk '/MemTotal:/ {total=$2} /MemAvailable:/ {available=$2} END {if (total) printf "RAM: %.1f / %.1f GiB used (available: %.1f GiB)\n", (total-available)/1048576, total/1048576, available/1048576}' /proc/meminfo
-}
-
-# Format a byte value as MiB or GiB for display.
-vram_or_unknown() {
-    local bytes="$1"
-    if [ -z "$bytes" ] || [ "$bytes" -le 0 ] 2>/dev/null; then
-        printf 'unknown'
-        return
-    fi
-    local mib=$(( bytes / 1024 / 1024 ))
-    if [ "$mib" -ge 1024 ]; then
-        printf '%d MiB (%.1f GiB)' "$mib" "$(python3 -c "print($mib / 1024)" 2>/dev/null || echo "0")"
-    else
-        printf '%d MiB' "$mib"
-    fi
-}
-
+# ── Server command building ──────────────────
 build_command() {
-    build_llamacpp_command
-}
-
-build_llamacpp_command() {
-    [ -x "$SERVER_BIN" ] || { echo "Set PMM_SERVER_BIN to an executable llama-server." >&2; return 1; }
+    [ -x "$SERVER_BIN" ] || { echo "Set PMM_SERVER_BIN or select a runtime with llama-server." >&2; return 1; }
     [ -f "$CURRENT_MODEL" ] || { echo "Model file missing." >&2; return 1; }
     validate_settings || return 1
     SERVER_ARGS=(
@@ -688,25 +615,20 @@ build_llamacpp_command() {
         --cache-type-v "$CACHE_V"
         --jinja
     )
-
     if [ "$LORA_ENABLED" = "on" ]; then
         SERVER_ARGS+=(--lora-scaled "$LORA_PATH:$LORA_SCALE")
     fi
-
     if [ "$REASONING_BUDGET" != "-1" ]; then
         SERVER_ARGS+=(--reasoning-budget "$REASONING_BUDGET")
     fi
-
     if [ "$VISION" = "on" ]; then
         if [ -n "$MMPROJ_PATH" ]; then
-            local mmproj
-            mmproj=$(find_mmproj) || return 1
+            local mmproj; mmproj=$(find_mmproj) || return 1
             SERVER_ARGS+=(--mmproj "$mmproj")
         elif [ "${VISION_ARG_MODE:-}" = "auto" ]; then
             SERVER_ARGS+=(--mmproj-auto)
         else
-            local mmproj
-            mmproj=$(find_mmproj) || return 1
+            local mmproj; mmproj=$(find_mmproj) || return 1
             SERVER_ARGS+=(--mmproj "$mmproj")
         fi
     fi
@@ -715,44 +637,32 @@ build_llamacpp_command() {
     fi
 }
 
+# ── Config persistence ──────────────────────
 save_config() {
     sanitize_settings
     local temporary
     temporary=$(mktemp "$CONFIG.XXXXXX") || return 1
     {
-        if [ -z "${PMM_MODEL_ROOT:-}" ] || [ "$CONFIG_HAS_MODEL_ROOT" -eq 1 ]; then
-            if [ -n "${PMM_MODEL_ROOT:-}" ]; then printf 'MODEL_ROOT=%q\n' "$SAVED_MODEL_ROOT"; else printf 'MODEL_ROOT=%q\n' "$MODEL_ROOT"; fi
-        fi
-        if [ -z "${PMM_PRISM_ROOT:-}" ] || [ "$CONFIG_HAS_PRISM_ROOT" -eq 1 ]; then
-            if [ -n "${PMM_PRISM_ROOT:-}" ]; then printf 'PRISM_ROOT=%q\n' "$SAVED_PRISM_ROOT"; else printf 'PRISM_ROOT=%q\n' "$PRISM_ROOT"; fi
-        fi
-
-        if [ -z "${PMM_SERVER_BIN:-}" ] || [ "$CONFIG_HAS_SERVER_BIN" -eq 1 ]; then
-            if [ -n "${PMM_SERVER_BIN:-}" ]; then printf 'SERVER_BIN=%q\n' "$SAVED_SERVER_BIN"; else printf 'SERVER_BIN=%q\n' "$SERVER_BIN"; fi
-        fi
-        if [ -z "${PMM_BENCH_BIN:-}" ] || [ "$CONFIG_HAS_BENCH_BIN" -eq 1 ]; then
-            if [ -n "${PMM_BENCH_BIN:-}" ]; then printf 'BENCH_BIN=%q\n' "$SAVED_BENCH_BIN"; else printf 'BENCH_BIN=%q\n' "$BENCH_BIN"; fi
+        if [ -z "${PMM_MODEL_ROOT:-}" ]; then
+            printf 'MODEL_ROOT=%q\n' "$SAVED_MODEL_ROOT"
+        elif [ -n "$SAVED_MODEL_ROOT" ]; then
+            printf 'MODEL_ROOT=%q\n' "$SAVED_MODEL_ROOT"
         fi
         printf 'HOST=%q\n' "$HOST"
         printf 'PORT=%q\n' "$PORT"
         printf 'STARTUP_TIMEOUT=%q\n' "$STARTUP_TIMEOUT"
-
         printf 'CTX=%q\n' "$CTX"
         printf 'NGL=%q\n' "$NGL"
         printf 'FLASH=%q\n' "$FLASH"
-
         printf 'BATCH=%q\n' "$BATCH"
         printf 'UBATCH=%q\n' "$UBATCH"
         printf 'PARALLEL=%q\n' "$PARALLEL"
-
         printf 'TEMP=%q\n' "$TEMP"
         printf 'TOP_P=%q\n' "$TOP_P"
         printf 'TOP_K=%q\n' "$TOP_K"
         printf 'MIN_P=%q\n' "$MIN_P"
-
         printf 'CACHE_K=%q\n' "$CACHE_K"
         printf 'CACHE_V=%q\n' "$CACHE_V"
-
         printf 'REASONING_BUDGET=%q\n' "$REASONING_BUDGET"
         printf 'MAX_OUTPUT_TOKENS=%q\n' "$MAX_OUTPUT_TOKENS"
         printf 'VISION=%q\n' "$VISION"
@@ -761,11 +671,9 @@ save_config() {
         printf 'MTP_MODE=%q\n' "$MTP_MODE"
         printf 'MTP_DRAFT_MAX=%q\n' "$MTP_DRAFT_MAX"
         printf 'MTP_DRAFT_FLAG=%q\n' "$MTP_DRAFT_FLAG"
-
         printf 'LORA_ENABLED=%q\n' "$LORA_ENABLED"
         printf 'LORA_SCALE=%q\n' "$LORA_SCALE"
         printf 'LORA_PATH=%q\n' "$LORA_PATH"
-
         printf 'CURRENT_MODEL=%q\n' "$CURRENT_MODEL"
     } > "$temporary" && mv -f -- "$temporary" "$CONFIG"
 }
@@ -777,62 +685,36 @@ model_profile_file() {
 }
 
 reset_model_runtime_defaults() {
-    CTX="$DEFAULT_CTX"
-    NGL="$DEFAULT_NGL"
-    FLASH="$DEFAULT_FLASH"
-
-    BATCH="$DEFAULT_BATCH"
-    UBATCH="$DEFAULT_UBATCH"
-    PARALLEL="$DEFAULT_PARALLEL"
-
-    TEMP="$DEFAULT_TEMP"
-    TOP_P="$DEFAULT_TOP_P"
-    TOP_K="$DEFAULT_TOP_K"
-    MIN_P="$DEFAULT_MIN_P"
-
-    CACHE_K="$DEFAULT_CACHE_K"
-    CACHE_V="$DEFAULT_CACHE_V"
-
-    REASONING_BUDGET="$DEFAULT_REASONING_BUDGET"
-    MAX_OUTPUT_TOKENS="$DEFAULT_MAX_OUTPUT_TOKENS"
-    VISION="$DEFAULT_VISION"
-    MMPROJ_PATH="$DEFAULT_MMPROJ_PATH"
-    MTP="$DEFAULT_MTP"
-    MTP_MODE="$DEFAULT_MTP_MODE"
-    MTP_DRAFT_MAX="$DEFAULT_MTP_DRAFT_MAX"
-    MTP_DRAFT_FLAG="$DEFAULT_MTP_DRAFT_FLAG"
-
-    LORA_ENABLED="$DEFAULT_LORA_ENABLED"
-    LORA_SCALE="$DEFAULT_LORA_SCALE"
-    LORA_PATH="$DEFAULT_LORA_PATH"
+    CTX="$DEFAULT_CTX" NGL="$DEFAULT_NGL" FLASH="$DEFAULT_FLASH"
+    BATCH="$DEFAULT_BATCH" UBATCH="$DEFAULT_UBATCH" PARALLEL="$DEFAULT_PARALLEL"
+    TEMP="$DEFAULT_TEMP" TOP_P="$DEFAULT_TOP_P" TOP_K="$DEFAULT_TOP_K" MIN_P="$DEFAULT_MIN_P"
+    CACHE_K="$DEFAULT_CACHE_K" CACHE_V="$DEFAULT_CACHE_V"
+    REASONING_BUDGET="$DEFAULT_REASONING_BUDGET" MAX_OUTPUT_TOKENS="$DEFAULT_MAX_OUTPUT_TOKENS"
+    VISION="$DEFAULT_VISION" MMPROJ_PATH="$DEFAULT_MMPROJ_PATH"
+    MTP="$DEFAULT_MTP" MTP_MODE="$DEFAULT_MTP_MODE" MTP_DRAFT_MAX="$DEFAULT_MTP_DRAFT_MAX" MTP_DRAFT_FLAG="$DEFAULT_MTP_DRAFT_FLAG"
+    LORA_ENABLED="$DEFAULT_LORA_ENABLED" LORA_SCALE="$DEFAULT_LORA_SCALE" LORA_PATH="$DEFAULT_LORA_PATH"
+    RUNTIME_ID="$DEFAULT_RUNTIME_ID"
+    RUNTIME_RECOMMENDED=""
 }
 
 save_model_profile() {
     sanitize_settings
     [ -n "$CURRENT_MODEL" ] || return 0
-
-    local profile
-    profile=$(model_profile_file)
-    local temporary
-    temporary=$(mktemp "$profile.XXXXXX") || return 1
-
+    local profile; profile=$(model_profile_file)
+    local temporary; temporary=$(mktemp "$profile.XXXXXX") || return 1
     {
         printf 'CTX=%q\n' "$CTX"
         printf 'NGL=%q\n' "$NGL"
         printf 'FLASH=%q\n' "$FLASH"
-
         printf 'BATCH=%q\n' "$BATCH"
         printf 'UBATCH=%q\n' "$UBATCH"
         printf 'PARALLEL=%q\n' "$PARALLEL"
-
         printf 'TEMP=%q\n' "$TEMP"
         printf 'TOP_P=%q\n' "$TOP_P"
         printf 'TOP_K=%q\n' "$TOP_K"
         printf 'MIN_P=%q\n' "$MIN_P"
-
         printf 'CACHE_K=%q\n' "$CACHE_K"
         printf 'CACHE_V=%q\n' "$CACHE_V"
-
         printf 'REASONING_BUDGET=%q\n' "$REASONING_BUDGET"
         printf 'MAX_OUTPUT_TOKENS=%q\n' "$MAX_OUTPUT_TOKENS"
         printf 'VISION=%q\n' "$VISION"
@@ -841,43 +723,59 @@ save_model_profile() {
         printf 'MTP_MODE=%q\n' "$MTP_MODE"
         printf 'MTP_DRAFT_MAX=%q\n' "$MTP_DRAFT_MAX"
         printf 'MTP_DRAFT_FLAG=%q\n' "$MTP_DRAFT_FLAG"
-
         printf 'LORA_ENABLED=%q\n' "$LORA_ENABLED"
         printf 'LORA_SCALE=%q\n' "$LORA_SCALE"
         printf 'LORA_PATH=%q\n' "$LORA_PATH"
+        printf 'RUNTIME_ID=%q\n' "$RUNTIME_ID"
     } > "$temporary" && mv -f -- "$temporary" "$profile"
 }
 
 load_model_profile() {
     [ -n "$CURRENT_MODEL" ] || return 1
-
     reset_model_runtime_defaults
 
-    local profile
-    profile=$(model_profile_file)
-
+    local profile; profile=$(model_profile_file)
     if [ -f "$profile" ]; then
-        # shellcheck disable=SC1090
         source "$profile"
+    fi
+
+    # After loading profile, resolve runtime binary
+    if [ -z "${PMM_SERVER_BIN:-}" ]; then
+        if [ -n "$RUNTIME_ID" ]; then
+            local resolved_bin
+            resolved_bin=$(resolve_runtime_binary "$RUNTIME_ID" 2>/dev/null || echo "")
+            if [ -n "$resolved_bin" ]; then
+                SERVER_BIN="$resolved_bin"
+            fi
+        fi
+    fi
+
+    # Compute recommendation based on codec
+    if [ -n "$CURRENT_MODEL" ] && [ -x "$RUNTIME_REGISTRY" ]; then
+        local codec
+        codec=$(model_codec "$CURRENT_MODEL")
+        if [ -n "$codec" ] && [ "$codec" != "Unknown" ]; then
+            RUNTIME_RECOMMENDED=$("$RUNTIME_REGISTRY" recommend "$codec" 2>/dev/null || echo "")
+        else
+            RUNTIME_RECOMMENDED=""
+        fi
     fi
 
     sanitize_settings "" persist
 }
 
-pause() {
-    echo
-    read -r -p "Press Enter to continue..." || true
-}
+# ── Process & health ─────────────────────────
+pause() { echo; read -r -p "Press Enter to continue..." || true; }
 
 title() {
     clear
     local cols="${TERM_COLS:-80}"
     [ "$cols" -gt 120 ] && cols=120
     printf '%b' "$C_CYAN$C_BOLD"
-    printf '%s\n' "  Prism Model Manager"
+    printf '%s\n' "  Prism Model Manager v4"
     printf '%b' "$C_RESET"
     printf '%b' "$C_DIM$C_GRAY"
-    printf '%s\n' "  Model Runtime & Backend Control"
+    printf '%s\n' "  GGUF Runtime & Backend Control"
     printf '%b' "$C_RESET"
     printf '%b' "$C_DIM$C_GRAY"
     sep "$cols"
@@ -885,9 +783,8 @@ title() {
 }
 
 process_start() {
-    local stat
     [[ "$1" =~ ^[1-9][0-9]*$ ]] || return 1
-    stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+    local stat; stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
     stat="${stat##*) }"
     [[ "$stat" != Z\ * ]] || return 1
     awk '{print $20}' <<< "$stat"
@@ -895,104 +792,89 @@ process_start() {
 
 server_pid() {
     if [ -f "$PIDFILE" ]; then
-        local pid
-        pid=$(cat "$PIDFILE" 2>/dev/null || true)
-
-        # Verify process identity as well as PID to avoid PID-reuse kills.
+        local pid; pid=$(cat "$PIDFILE" 2>/dev/null || true)
         local recorded actual
         [ "$(cat "$PIDFILE.boot" 2>/dev/null)" = "$(cat /proc/sys/kernel/random/boot_id)" ] || return 1
         recorded=$(cat "$PIDFILE.start" 2>/dev/null || true)
         actual=$(process_start "$pid")
         if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && [ -n "$recorded" ] && [ "$recorded" = "$actual" ] && kill -0 "$pid" 2>/dev/null; then
-            echo "$pid"
-            return 0
+            echo "$pid"; return 0
         fi
     fi
-
     return 1
 }
 
 server_health() {
-    curl --noproxy '*' -fsS \
-        --max-time 1 \
-        "$(api_base)/health" \
-        >/dev/null 2>&1
+    curl --noproxy '*' -fsS --max-time 1 "$(api_base)/health" >/dev/null 2>&1
 }
 
-# ─────────────────────────────────────────────
-# API readiness: base URL, reachability, running model ID.
-# ─────────────────────────────────────────────
-
-# Query /v1/models and print exactly one line: the running model id,
-# "unavailable" when the API did not answer, or "malformed" when the
-# HTTP body is not a usable JSON model list. A saved runtime endpoint is used
-# only when its PID/start/boot identity is valid. When a loaded model is known,
-# prefer an exact or basename ID match; otherwise use the first listed ID as a
-# documented fallback.
-# Exit: 0 for id, 1 for unavailable, 2 for malformed.
+# ── API readiness ───────────────────────────
 api_models_info() {
     local body expected_id="" model_id
     if server_pid >/dev/null && [ -f "$STATE_DIR/runtime.env" ]; then
-        # shellcheck disable=SC1091
         source "$STATE_DIR/runtime.env"
         expected_id=$(basename "${RUN_MODEL:-}" 2>/dev/null || true)
         [ "$expected_id" = "." ] && expected_id=""
     fi
-    if body=$(curl --noproxy '*' --max-time 5 -f -sS \
-            --connect-timeout 3 \
-            "$(api_base)/v1/models" 2>/dev/null); then
+    if body=$(curl --noproxy '*' --max-time 5 -f -sS --connect-timeout 3 "$(api_base)/v1/models" 2>/dev/null); then
         if [ -n "$expected_id" ]; then
             model_id=$(jq -er --arg expected "$expected_id" '
-                ([.data[]?.id // empty] |
-                 map(select(. == $expected or (split("/")[-1] == $expected)))[0] // empty)
+                ([.data[]?.id // empty] | map(select(. == $expected or (split("/")[-1] == $expected)))[0] // empty)
             ' <<< "$body" 2>/dev/null || true)
             if [ -z "$model_id" ]; then
-                printf '%s\n' "malformed"
-                return 2
+                printf '%s\n' "malformed"; return 2
             fi
         else
             model_id=$(jq -er '.data[0].id // empty' <<< "$body" 2>/dev/null || true)
         fi
-        if [ -n "$model_id" ]; then
-            printf '%s\n' "$model_id"
-            return 0
-        fi
-        printf '%s\n' "malformed"
-        return 2
+        if [ -n "$model_id" ]; then printf '%s\n' "$model_id"; return 0; fi
+        printf '%s\n' "malformed"; return 2
     fi
-    printf '%s\n' "unavailable"
-    return 1
+    printf '%s\n' "unavailable"; return 1
 }
 
+# ── Model selection ─────────────────────────
 choose_model() {
     local selected models
     models=$(scan_models) || { pause; return 1; }
-    [ -n "$models" ] || { echo "No models found in $MODEL_ROOT. Set Model directory in settings." >&2; pause; return 1; }
+    [ -n "$models" ] || { echo "No models found in $MODEL_ROOT." >&2; pause; return 1; }
 
     selected=$(
         printf '%s\n' "$models" \
-        | gum filter \
-            --height 20 \
-            --placeholder "Search model..."
+        | gum filter --height 20 --placeholder "Search model..."
     )
-
     [ -n "$selected" ] || return 1
 
-    # Preserve the previous model's last-used parameters.
-    # Only save when switching to a DIFFERENT model — re-selecting the same model
-    # must NOT overwrite its own profile with the current in-memory values.
-    if [ -n "$CURRENT_MODEL" ] &&
-       [ "$selected" != "$CURRENT_MODEL" ] &&
-       { [ -f "$CURRENT_MODEL" ] || [ -d "$CURRENT_MODEL" ]; }; then
+    # Save previous model's profile when switching to a different one
+    if [ -n "$CURRENT_MODEL" ] && [ "$selected" != "$CURRENT_MODEL" ] && { [ -f "$CURRENT_MODEL" ] || [ -d "$CURRENT_MODEL" ]; }; then
         save_model_profile
     fi
 
     CURRENT_MODEL="$selected"
-    model_info "$CURRENT_MODEL"
+
+    # Show info
+    local codec arch name
+    codec=$(model_codec "$CURRENT_MODEL")
+    arch=$(model_architecture "$CURRENT_MODEL")
+    echo "Model: $(basename "$CURRENT_MODEL")"
+    echo "Architecture: ${arch:-unknown}"
+    echo "Codec: ${codec:-Unknown}"
+
+    # Show recommendation if available and no runtime selected yet
+    if [ -z "$RUNTIME_ID" ] || [ "$RUNTIME_ID" = "Not selected" ]; then
+        if [ -n "$codec" ] && [ "$codec" != "Unknown" ] && [ -x "$RUNTIME_REGISTRY" ]; then
+            local recommended
+            recommended=$("$RUNTIME_REGISTRY" recommend "$codec" 2>/dev/null || echo "")
+            if [ -n "$recommended" ]; then
+                echo "Recommended runtime: $recommended"
+                RUNTIME_RECOMMENDED="$recommended"
+            fi
+        fi
+    fi
+
     gpu_info
     pause
 
-    # Each model gets its own remembered settings.
     load_model_profile
     save_config
 }
@@ -1000,43 +882,33 @@ choose_model() {
 find_mmproj() {
     if [ -n "$MMPROJ_PATH" ]; then
         [ -r "$MMPROJ_PATH" ] && [ -f "$MMPROJ_PATH" ] || { echo "Projector not readable: $MMPROJ_PATH" >&2; return 1; }
-        printf '%s\n' "$MMPROJ_PATH"
-        return
+        printf '%s\n' "$MMPROJ_PATH"; return
     fi
     local -a projectors=()
     mapfile -d '' -t projectors < <(find "$(dirname "$CURRENT_MODEL")" -maxdepth 1 -type f -iname '*mmproj*.gguf' -print0)
-    [ "${#projectors[@]}" -eq 1 ] || { echo "Vision requires exactly one adjacent mmproj or an explicit projector path (found ${#projectors[@]})." >&2; return 1; }
+    [ "${#projectors[@]}" -eq 1 ] || { echo "Vision requires exactly one adjacent mmproj (found ${#projectors[@]})." >&2; return 1; }
     printf '%s\n' "${projectors[0]}"
 }
 
-with_lifecycle_lock() (
-    flock -n 9 || { echo "Another manager is changing the server; retry shortly." >&2; return 1; }
-    "$@"
-) 9>"$STATE_DIR/lifecycle.lock"
+# ── Lifecycle lock ──────────────────────────
+with_lifecycle_lock() ( flock -n 9 || { echo "Another manager is running; retry." >&2; return 1; }; "$@"; ) 9>"$STATE_DIR/lifecycle.lock"
 
 stop_server() { with_lifecycle_lock stop_server_locked; }
 
 stop_server_locked() {
     local pid
     if ! pid=$(server_pid); then
-        echo "No verified managed process to stop; external services are untouched."
+        echo "No verified managed process to stop."
         return 0
     fi
     echo "Stopping managed server PID $pid..."
-    # Recheck identity before each signal, including escalation.
     [ "$(server_pid)" = "$pid" ] || return 1
     kill -TERM "$pid" 2>/dev/null || true
-    for _ in {1..40}; do
-        server_pid >/dev/null || break
-        sleep 0.1
-    done
+    for _ in {1..40}; do server_pid >/dev/null || break; sleep 0.1; done
     if [ "$(server_pid)" = "$pid" ]; then
-        echo "Graceful shutdown timed out; stopping the verified managed process."
+        echo "Graceful shutdown timed out; killing."
         kill -KILL "$pid" 2>/dev/null || true
-        for _ in {1..20}; do
-            server_pid >/dev/null || break
-            sleep 0.1
-        done
+        for _ in {1..20}; do server_pid >/dev/null || break; sleep 0.1; done
     fi
     server_pid >/dev/null && { echo "Unable to stop managed process." >&2; return 1; }
     wait "$pid" 2>/dev/null || true
@@ -1048,14 +920,24 @@ start_server() { with_lifecycle_lock start_server_locked; }
 
 start_server_locked() {
     server_pid >/dev/null && { echo "Managed process already exists; use Load / Switch Model." >&2; return 1; }
-    local effective_backend
-    effective_backend=$(resolve_backend "$CURRENT_MODEL")
-    local effective_plugin
-    effective_plugin=$(resolve_plugin "$CURRENT_MODEL")
+
+    # Check runtime selection (skip if PMM_SERVER_BIN provides session override)
+    if [ -z "$RUNTIME_ID" ] || [ "$RUNTIME_ID" = "Not selected" ]; then
+        if [ -z "${PMM_SERVER_BIN:-}" ] || [ ! -x "$PMM_SERVER_BIN" ]; then
+            echo ""
+            echo "No llama.cpp runtime selected for this model."
+            echo "Select a runtime in Settings -> Runtime fork."
+            echo ""
+            pause
+            return 1
+        fi
+        # PMM_SERVER_BIN provides a valid explicit binary — use that
+        SERVER_BIN="$PMM_SERVER_BIN"
+    fi
 
     preflight || return 1
 
-    # Interactive port conflict resolution
+    # Port conflict resolution
     if ! port_available 2>/dev/null; then
         echo ""
         echo "Port $PORT is already in use."
@@ -1071,13 +953,12 @@ start_server_locked() {
                         echo "Invalid port." >&2; pause; return 1
                     fi
                     PORT="$new_port"
-                    # Re-check
                     port_available || { echo "Port $PORT also in use." >&2; pause; return 1; }
                     ;;
                 *) echo "Cancelled."; return 1 ;;
             esac
         else
-            echo "Non-interactive: choose a different port or set PORT in settings." >&2
+            echo "Non-interactive: choose a different port." >&2
             return 1
         fi
     fi
@@ -1085,10 +966,9 @@ start_server_locked() {
     : > "$LOGFILE"
     echo "Loading $(basename "$CURRENT_MODEL") on $HOST:$PORT (timeout ${STARTUP_TIMEOUT}s)..."
     echo "Server startup: $(date)" >> "$LOGFILE"
-    echo "Backend: $effective_backend" >> "$LOGFILE"
-    echo "Plugin: $effective_plugin" >> "$LOGFILE"
+    echo "Backend: llama.cpp" >> "$LOGFILE"
+    echo "Runtime: $(runtime_display_name "$RUNTIME_ID" 2>/dev/null || echo "$RUNTIME_ID")" >> "$LOGFILE"
 
-    : > "$LOGFILE"
     nohup "${SERVER_ARGS[@]}" 9>&- >"$LOGFILE" 2>&1 < /dev/null &
     local pid=$!
     local deadline=$((SECONDS + STARTUP_TIMEOUT))
@@ -1104,13 +984,8 @@ start_server_locked() {
 
     while (( SECONDS < deadline )); do
         if ! server_pid >/dev/null; then
-            # Process died
-            local backend_name
-            backend_name=$(resolve_backend "$CURRENT_MODEL")
-            echo "${backend_name} server exited before becoming ready." >&2
+            echo "Server exited before becoming ready." >&2
             echo "Server log: $LOGFILE" >&2
-
-            # Show last lines of log
             tail -20 "$LOGFILE" >&2
             wait "$pid" 2>/dev/null || true
             rm -f "$PIDFILE" "$PIDFILE.start" "$PIDFILE.boot" "$STATE_DIR/runtime.env"
@@ -1124,23 +999,19 @@ start_server_locked() {
         sleep 0.25
     done
 
-    echo "Startup timed out; cleaning up this launch. Log: $LOGFILE" >&2
+    echo "Startup timed out." >&2
     tail -20 "$LOGFILE" >&2
     stop_server_locked || true
     return 1
 }
 
 report_action() {
-    local label="$1" report result=0
-    shift
+    local label="$1" report result=0; shift
     report=$(mktemp "$STATE_DIR/action.XXXXXX") || return 1
     echo "$label..."
     "$@" > "$report" 2>&1 || result=$?
-    if [ "$result" -eq 0 ]; then
-        LAST_ACTION="$label succeeded."
-    else
-        LAST_ACTION="$label failed (exit $result):"$'\n'"$(cat "$report")"
-    fi
+    if [ "$result" -eq 0 ]; then LAST_ACTION="$label succeeded."
+    else LAST_ACTION="$label failed (exit $result):"$'\n'"$(cat "$report")"; fi
     cat "$report"
     rm -f -- "$report"
     printf '%s\n' "$LAST_ACTION"
@@ -1148,29 +1019,19 @@ report_action() {
 }
 
 switch_model() {
-    LAST_ACTION="Model selection cancelled; no model was stopped."
+    LAST_ACTION="Model selection cancelled."
     choose_model || return 1
-    LAST_ACTION="Loading cancelled in settings; selected model is not necessarily running."
+    LAST_ACTION="Loading cancelled in settings."
     settings_menu load || return 1
 
-    # Ensure the required backend is installed
-    local effective_backend
-    effective_backend=$(resolve_backend "$CURRENT_MODEL")
-    LAST_ACTION="Backend installation"
-    ensure_backend "llama.cpp" || { pause; return 1; }
-
-    # Persist resolved values
-    [ -n "$CURRENT_MODEL" ] && save_model_profile
-    save_config
-
+    local result=0
     report_action "Validation" preflight || { pause; return 1; }
     local expected_pid
     expected_pid=$(server_pid || true)
     if [ -n "$expected_pid" ]; then
-        LAST_ACTION="Switch cancelled; the managed model was kept running."
+        LAST_ACTION="Switch cancelled; existing model kept running."
         gum confirm "Stop the managed model and load $(basename "$CURRENT_MODEL")?" || return 1
     fi
-    local result=0
     report_action "Model loading" with_lifecycle_lock switch_server_locked "$expected_pid" || result=$?
     pause
     return "$result"
@@ -1178,42 +1039,65 @@ switch_model() {
 
 switch_server_locked() {
     [ "$(server_pid || true)" = "${1:-}" ] || { echo "Managed process changed; select Load / Switch again." >&2; return 1; }
-    # Validate again under the lock before touching a working model.
     preflight || return 1
     local RUN_HOST="$HOST" RUN_PORT="$PORT" RUN_MODEL=""
     if server_pid >/dev/null; then
-        if [ -f "$STATE_DIR/runtime.env" ]; then
-            # shellcheck disable=SC1091
-            source "$STATE_DIR/runtime.env"
-        fi
+        if [ -f "$STATE_DIR/runtime.env" ]; then source "$STATE_DIR/runtime.env"; fi
         if [ "$HOST:$PORT" != "$RUN_HOST:$RUN_PORT" ]; then port_available || return 1; fi
         stop_server_locked || return 1
     fi
     start_server_locked
 }
 
-# ─────────────────────────────────────────────
-# Colored status screen
-# ─────────────────────────────────────────────
+# ── Runtime status ──────────────────────────
+runtime_status() {
+    if server_pid >/dev/null; then
+        if server_health; then echo 'RUNNING (managed)'; else echo 'LOADING (see logs)'; fi
+    elif server_health; then
+        echo 'EXTERNAL SERVER'
+    else
+        echo 'STOPPED'
+    fi
+}
 
+runtime_state_status() {
+    if server_pid >/dev/null; then echo "MANAGED: PID $(server_pid)"; return 0; fi
+    if server_health; then echo "EXTERNAL: healthy API at $(api_base)"; return 0; fi
+    if [ -e "$PIDFILE" ] || [ -e "$PIDFILE.start" ] || [ -e "$PIDFILE.boot" ] || [ -e "$STATE_DIR/runtime.env" ]; then
+        echo "STALE: runtime metadata present, no verified process"
+        return 2
+    fi
+    echo "STOPPED: no managed process"
+    return 0
+}
+
+clear_stale_state() {
+    if server_pid >/dev/null; then echo "Refusing to clear metadata for managed process." >&2; return 1; fi
+    if server_health; then echo "Refusing to clear metadata while healthy API exists." >&2; return 1; fi
+    rm -f "$PIDFILE" "$PIDFILE.start" "$PIDFILE.boot" "$STATE_DIR/runtime.env"
+    echo "Cleared stale metadata."
+}
+
+# ── Memory / GPU helpers ────────────────────
+memory_status() {
+    nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu --format=csv,noheader 2>/dev/null || echo 'NVIDIA usage unavailable.'
+    awk '/MemTotal:/ {total=$2} /MemAvailable:/ {available=$2} END {if (total) printf "RAM: %.1f / %.1f GiB used\n", (total-available)/1048576, total/1048576}' /proc/meminfo
+}
+
+# ══════════════════════════════════════════════
+# STATUS SCREEN
+# ══════════════════════════════════════════════
 status_screen() {
     sanitize_settings "" persist
     title
 
-    local status
-    status=$(runtime_status)
+    local status; status=$(runtime_status)
 
-    # ── Server panel ──
-    printf '%b' "$C_DIM$C_GRAY"
-    sep
-    printf '%b' "$C_RESET"
-    printf '  %-15s ' "Server"
-    colored_status "$status"
-    printf '\n'
+    printf '%b' "$C_DIM$C_GRAY"; sep; printf '%b' "$C_RESET"
+    printf '  %-15s ' "Server"; colored_status "$status"; printf '\n'
 
     if server_pid >/dev/null && [ -f "$STATE_DIR/runtime.env" ]; then
         local RUN_MODEL="" RUN_HOST="" RUN_PORT=""
-        # shellcheck disable=SC1091
         source "$STATE_DIR/runtime.env"
         printf '  %-15s %b%s%b\n' "Loaded model" "$C_CYAN" "$(basename "$RUN_MODEL")" "$C_RESET"
         printf '  %-15s %s\n' "PID" "$(server_pid)"
@@ -1221,182 +1105,94 @@ status_screen() {
     fi
 
     echo
-    printf '%b' "$C_DIM$C_GRAY"
-    sep
-    printf '%b' "$C_RESET"
-    printf '  %-15s ' "API reachable"
-    api_ready_lines
-    echo
+    printf '%b' "$C_DIM$C_GRAY"; sep; printf '%b' "$C_RESET"
 
-    # ── Profile panel ──
-    printf '%b' "$C_DIM$C_GRAY"
-    sep
-    printf '%b' "  $C_BOLD$C_WHITE"
-    printf '%s\n' "Model Profile"
-    printf '%b' "$C_RESET"
     local model_label="${CURRENT_MODEL:+$(basename "$CURRENT_MODEL")}"
     printf '  %-17s ' "Model"
     printf '%b%s%b\n' "$C_CYAN" "${model_label:-None}" "$C_RESET"
 
-    local effective_backend effective_plugin
-    effective_backend=$(resolve_backend "$CURRENT_MODEL")
-    effective_plugin=$(resolve_plugin "$CURRENT_MODEL")
-    printf '  %-17s %s\n' "Backend" "$effective_backend"
-    if [ -n "$effective_plugin" ] && [ "$effective_plugin" != "None" ]; then
-        printf '  %-17s %s\n' "Plugin" "$effective_plugin"
+    # Codec
+    if [ -n "$CURRENT_MODEL" ]; then
+        local codec; codec=$(model_codec "$CURRENT_MODEL")
+        printf '  %-17s %b%s%b\n' "Codec" "$C_MAGENTA" "${codec:-Unknown}" "$C_RESET"
     fi
 
-    # ── llama.cpp profile ──
+    printf '  %-17s %s\n' "Backend" "llama.cpp"
+    if [ -n "$RUNTIME_ID" ]; then
+        local display_name; display_name=$(runtime_display_name "$RUNTIME_ID" 2>/dev/null || echo "$RUNTIME_ID")
+        printf '  %-17s %s\n' "Runtime" "$display_name"
+    fi
     printf '  %-17s %s\n' "Context" "$CTX"
     printf '  %-17s %s\n' "GPU layers" "$NGL"
-    printf '  %-17s %s\n' "Flash Attention" "$FLASH"
-    printf '  %-17s %s\n' "Batch / UBatch" "$BATCH / $UBATCH"
-    printf '  %-17s %s\n' "Parallel" "$PARALLEL"
     printf '  %-17s %s\n' "KV cache K/V" "$CACHE_K / $CACHE_V"
+    printf '  %-17s %s\n' "MTP" "$MTP"
+    printf '  %-17s %s\n' "Parallel slots" "$PARALLEL"
 
-    printf '  %-17s %s\n' "Temperature" "$TEMP"
-    printf '  %-17s %s\n' "Top-P / Top-K" "$TOP_P / $TOP_K"
-    printf '  %-17s %s\n' "Min-P" "$MIN_P"
-    printf '  %-17s ' "Reasoning budget"
-    if [ "$REASONING_BUDGET" = -1 ]; then
-        printf '%b%s%b' "$C_GRAY" "Unlimited" "$C_RESET"
-    elif [ "$REASONING_BUDGET" = 0 ]; then
-        printf '%b%s%b' "$C_YELLOW" "Disabled (0)" "$C_RESET"
-    else
-        printf '%s' "$REASONING_BUDGET"
-    fi
-    printf '\n'
-    printf '  %-17s ' "Max output tokens"
-    if [ "$MAX_OUTPUT_TOKENS" = -1 ]; then
-        printf '%b%s%b' "$C_GRAY" "Unlimited" "$C_RESET"
-    else
-        printf '%s' "$MAX_OUTPUT_TOKENS"
-    fi
-    printf '\n'
-
-    local vision_label="${MMPROJ_PATH:-auto or adjacent projector}"
-    printf '  %-17s %s (%s)\n' "Vision" "$VISION" "$vision_label"
-    printf '  %-17s %s (%s, draft max %s)\n' "MTP" "$MTP" "$MTP_MODE" "$MTP_DRAFT_MAX"
-    lora_label="off"
-    [ "$LORA_ENABLED" = "on" ] && lora_label="Uncensored x$LORA_SCALE"
-    printf '  %-17s %b%s%b\n' "LoRA" "$C_MAGENTA" "$lora_label" "$C_RESET"
-
-    # ── GPU panel ──
     echo
-    printf '%b' "$C_DIM$C_GRAY"
-    sep
-    printf '%b' "  $C_BOLD$C_WHITE"
-    printf '%s\n' "GPU & Memory"
-    printf '%b' "$C_RESET"
+    printf '%b' "$C_DIM$C_GRAY"; sep; printf '%b' "$C_RESET"
+    printf '  %-15s ' "API reachable"; api_ready_lines; echo
+    echo
+    printf '%b' "$C_DIM$C_GRAY"; sep; printf '%b' "$C_RESET"
+    printf '  %b%s%b\n' "$C_BOLD$C_WHITE" "GPU & Memory" "$C_RESET"
     memory_status
-
     pause
 }
 
-# ─────────────────────────────────────────────
-# API Ready view
-# ─────────────────────────────────────────────
-
-# Emit the API-Ready facts as aligned lines and return a readiness status.
-# Suitable for stdout, the Status screen, and the API Ready view; nothing
-# interactive.  The Status/TUI callers ignore the status, while the CLI uses it
-# for automation-friendly nonzero failures.
+# ══════════════════════════════════════════════
+# API READY VIEW
+# ══════════════════════════════════════════════
 api_ready_status() {
     local base health_status=0 model_status=0 model_id
     base="$(api_base)"
     printf 'API base URL  : %s\n' "$base"
     printf 'OpenAI API    : %s/v1\n' "$base"
-    if server_health; then
-        printf 'API reachable : yes\n'
+    if server_health; then printf 'API reachable : yes\n'
     else
-        health_status=$?
-        # curl normally returns 1 here, but preserve any nonzero health code
-        # when a test double or platform curl reports something more specific.
-        [ "$health_status" -ne 0 ] || health_status=1
+        health_status=$?; [ "$health_status" -ne 0 ] || health_status=1
         printf 'API reachable : no\n'
     fi
-
-    if model_id=$(api_models_info); then
-        model_status=0
-    else
-        model_status=$?
-    fi
+    if model_id=$(api_models_info); then model_status=0
+    else model_status=$?; fi
     case "$model_id" in
-        "unavailable")
-            printf 'Model ID      : unavailable (API not responding)\n'
-            ;;
-        "malformed")
-            printf 'Model ID      : not reported (unexpected API response)\n'
-            ;;
-        "")
-            printf 'Model ID      : unknown\n'
-            ;;
-        *)
-            printf 'Model ID      : %s\n' "$model_id"
-            ;;
+        "unavailable") printf 'Model ID      : unavailable (API not responding)\n' ;;
+        "malformed")   printf 'Model ID      : not reported (unexpected API response)\n' ;;
+        "")            printf 'Model ID      : unknown\n' ;;
+        *)             printf 'Model ID      : %s\n' "$model_id" ;;
     esac
-
-    # A healthy /health response with an unusable model list is distinct from
-    # transport/API failure, matching api_models_info()'s 0/1/2 contract.
-    if [ "$health_status" -ne 0 ]; then
-        return 1
-    fi
+    if [ "$health_status" -ne 0 ]; then return 1; fi
     return "$model_status"
 }
 
-# Display-only compatibility wrapper: status screens must remain interactive
-# and must not terminate because an external API is unavailable.
-api_ready_lines() {
-    api_ready_status || true
-}
+api_ready_lines() { api_ready_status || true; }
 
-# Interactive API Ready view.
 api_ready_view() {
     title
-
-    printf '%b' "$C_DIM$C_GRAY"
-    sep
-    printf '%b' "  $C_BOLD$C_WHITE"
-    printf '%s\n' "API Ready"
-    printf '%b' "$C_RESET"
-
+    printf '%b' "$C_DIM$C_GRAY"; sep; printf '%b' "$C_RESET"
+    printf '  %b%s%b\n' "$C_BOLD$C_WHITE" "API Ready" "$C_RESET"
     local health_color="$C_GREEN" health_text="yes"
-    if ! server_health; then
-        health_color="$C_RED"
-        health_text="no"
-    fi
-    local base
-    base="$(api_base)"
+    if ! server_health; then health_color="$C_RED"; health_text="no"; fi
+    local base; base="$(api_base)"
     printf '  %-17s %s\n' "API base URL" "$base"
     printf '  %-17s %s\n' "OpenAI API" "$base/v1"
     printf '  %-17s ' "API reachable"
     printf '%b%s%b\n' "$health_color$C_BOLD" "$health_text" "$C_RESET"
-
     local model_id="unknown"
     model_id=$(api_models_info || true)
     case "$model_id" in
-        "unavailable") model_id="unavailable (API not responding)" ;;
-        "malformed")   model_id="not reported (unexpected API response)" ;;
+        "unavailable") model_id="unavailable" ;;
+        "malformed")   model_id="not reported" ;;
     esac
     printf '  %-17s %s\n' "Model ID" "$model_id"
-
-    echo
-    printf '%b' "$C_DIM$C_GRAY"
-    sep
-    printf '%b' "$C_RESET"
-    echo "  Connect an external OpenAI-compatible client (DSH, Hermes,"
-    echo "  OpenCode, Pi, ...):"
-    echo "    base_url -> set to the OpenAI API line above (including /v1 suffix)"
-    echo "    model    -> set to the Model ID line above (as reported by /v1/models,"
-    echo "                not the file name)"
-    echo "    api_key  -> not required (local server, no authentication)"
+    echo; printf '%b' "$C_DIM$C_GRAY"; sep; printf '%b' "$C_RESET"
+    echo "  Connect an OpenAI-compatible client:"
+    echo "    base_url -> $(api_base)/v1"
+    echo "    model    -> $(api_models_info 2>/dev/null || echo '<model id>')"
     pause
 }
 
-# ─────────────────────────────────────────────
-# Settings menu (colored)
-# ─────────────────────────────────────────────
-
+# ══════════════════════════════════════════════
+# FIXED PRIMARY SETTINGS MENU (v4)
+# ══════════════════════════════════════════════
 settings_menu() {
     sanitize_settings "" persist
     local mode="${1:-edit}" value
@@ -1408,66 +1204,100 @@ settings_menu() {
         if [ -n "$model_name" ]; then
             printf '  %bModel%b : %b%s%b\n' "$C_DIM" "$C_RESET" "$C_CYAN" "$model_name" "$C_RESET"
         fi
-        # Show detected format
-        local format_name format_str
-        format_name=$(model_format_key "$CURRENT_MODEL" "format" 2>/dev/null || echo "unknown")
-        case "$format_name" in
-            gguf*|gguf_shard) format_str="GGUF" ;;
-            hf) format_str="HuggingFace" ;;
-            mirai_s) format_str="Mirai S" ;;
-            *) format_str="$format_name" ;;
-        esac
-        if [ -n "$format_str" ] && [ "$format_str" != "unknown" ]; then
-            printf '  %bFormat%b : %s\n' "$C_DIM" "$C_RESET" "$format_str"
+
+        # Show format
+        if [ -n "$CURRENT_MODEL" ]; then
+            local format_str codec_str
+            format_str=$(model_format_str "$CURRENT_MODEL" 2>/dev/null || echo "GGUF")
+            codec_str=$(model_codec "$CURRENT_MODEL" 2>/dev/null || echo "Unknown")
+            printf '  %bFormat%b  : %s\n' "$C_DIM" "$C_RESET" "$format_str"
+            printf '  %bCodec%b  : %b%s%b\n' "$C_DIM" "$C_RESET" "$C_MAGENTA" "$codec_str" "$C_RESET"
+
+            # Show recommendation if no runtime selected
+            if [ -z "$RUNTIME_RECOMMENDED" ]; then
+                local recommended
+                recommended=$("$RUNTIME_REGISTRY" recommend "$codec_str" 2>/dev/null || echo "")
+                if [ -n "$recommended" ]; then
+                    RUNTIME_RECOMMENDED="$recommended"
+                fi
+            fi
+            if [ -n "$RUNTIME_RECOMMENDED" ] && { [ -z "$RUNTIME_ID" ] || [ "$RUNTIME_ID" = "Not selected" ]; }; then
+                printf '  %bRecommended runtime%b : %b%s%b\n' "$C_DIM" "$C_RESET" "$C_GREEN" "$RUNTIME_RECOMMENDED" "$C_RESET"
+            fi
         fi
-        local effective_backend effective_plugin
-        effective_backend=$(resolve_backend "$CURRENT_MODEL")
-        effective_plugin=$(resolve_plugin "$CURRENT_MODEL")
-        printf '  %bBackend%b         %s\n' "$C_DIM" "$C_RESET" "$effective_backend"
-        printf '  %bPlugin%b          %s\n' "$C_DIM" "$C_RESET" "$effective_plugin"
-        local backend_label="$SERVER_BIN"
-        [ -n "${PMM_SERVER_BIN:-}" ] && backend_label="$backend_label (PMM_SERVER_BIN)"
-        printf '%b' "$C_DIM$C_GRAY"
-        sep
-        printf '%b' "$C_RESET"
+
+        # Backend
+        printf '  %bBackend%b %b[llama.cpp]%b\n' "$C_DIM" "$C_RESET" "$C_GREEN" "$C_RESET"
+
+        # Runtime info
+        local rt_display="Not selected"
+        if [ -n "$RUNTIME_ID" ] && [ "$RUNTIME_ID" != "Not selected" ]; then
+            rt_display=$(runtime_display_name "$RUNTIME_ID" 2>/dev/null || echo "$RUNTIME_ID")
+        fi
+        printf '  %bRuntime fork%b : %s\n' "$C_DIM" "$C_RESET" "$rt_display"
+
+        local rt_folder_display="Not selected"
+        if [ -n "$RUNTIME_ID" ] && [ "$RUNTIME_ID" != "Not selected" ]; then
+            rt_folder_display=$(runtime_registry_get "$RUNTIME_ID" "folder" 2>/dev/null || echo "Not selected")
+            if [ -n "$rt_folder_display" ]; then
+                rt_folder_display="${rt_folder_display/#\~/$HOME}"
+            fi
+        fi
+        printf '  %bRuntime folder%b : %s\n' "$C_DIM" "$C_RESET" "$rt_folder_display"
+
+        printf '%b' "$C_DIM$C_GRAY"; sep; printf '%b' "$C_RESET"
         echo
 
         local -a items=()
 
-        # ── llama.cpp settings ──
+        # ── FIXED PRIMARY ORDER ──
         items+=(
-            "Context size          [$CTX]"
+            "Model                 [$(basename "$CURRENT_MODEL")]"
+            "Format                [$(model_format_str "$CURRENT_MODEL" 2>/dev/null || echo "GGUF")]"
+            "Codec                 [$(model_codec "$CURRENT_MODEL" 2>/dev/null || echo "Unknown")]"
+        )
+        items+=(
+            "Backend               [llama.cpp]"
+            "Runtime fork          [$rt_display]"
+            "Runtime folder        [$(basename "$rt_folder_display" 2>/dev/null || echo "$RUNTIME_ID")]"
+        )
+        items+=(
+            "Context               [$CTX]"
             "GPU layers            [$NGL]"
-            "Flash Attention       [$FLASH]"
-            "Batch size            [$BATCH]"
-            "UBatch size           [$UBATCH]"
-            "Parallel slots        [$PARALLEL]"
             "KV cache K            [$CACHE_K]"
             "KV cache V            [$CACHE_V]"
-            "Temperature           [$TEMP]"
-            "Top-P                 [$TOP_P]"
-            "Top-K                 [$TOP_K]"
-            "Min-P                 [$MIN_P]"
-            "Reasoning budget      [$REASONING_BUDGET]"
-            "Max output tokens     [$MAX_OUTPUT_TOKENS]"
-            "Vision                [$VISION]"
-            "Projector path        [${MMPROJ_PATH:-auto}]"
             "MTP                   [$MTP]"
-            "MTP mode              [$MTP_MODE]"
-            "MTP draft flag        [$MTP_DRAFT_FLAG]"
-            "MTP draft max         [$MTP_DRAFT_MAX]"
-            "Backend executable    [$SERVER_BIN]"
-            "Uncensored LoRA       [$LORA_ENABLED]"
-            "LoRA scale            [$LORA_SCALE]"
-            "LoRA file             [$(basename "$LORA_PATH")]"
+            "Parallel slots        [$PARALLEL]"
+        )
+        items+=(
             "API host              [$HOST]"
             "API port              [$PORT]"
             "Startup timeout       [$STARTUP_TIMEOUT]"
         )
 
-        items+=(
-            "Model root            [$MODEL_ROOT]"
-        )
+        # ── ADVANCED (collapsible) ──
+        items+=("▼ Advanced")
+        items+=("  Batch size            [$BATCH]")
+        items+=("  UBatch size           [$UBATCH]")
+        items+=("  Flash Attention       [$FLASH]")
+        items+=("  Temperature           [$TEMP]")
+        items+=("  Top-P                 [$TOP_P]")
+        items+=("  Top-K                 [$TOP_K]")
+        items+=("  Min-P                 [$MIN_P]")
+        items+=("  Reasoning budget      [$REASONING_BUDGET]")
+        items+=("  Max output tokens     [$MAX_OUTPUT_TOKENS]")
+        items+=("  Vision                [$VISION]")
+        items+=("  Projector path        [${MMPROJ_PATH:-auto}]")
+        items+=("  MTP mode              [$MTP_MODE]")
+        items+=("  MTP draft flag        [$MTP_DRAFT_FLAG]")
+        items+=("  MTP draft max         [$MTP_DRAFT_MAX]")
+        items+=("  Uncensored LoRA       [$LORA_ENABLED]")
+        items+=("  LoRA scale            [$LORA_SCALE]")
+        items+=("  LoRA file             [$(basename "$LORA_PATH")]")
+        items+=("  Model root            [$MODEL_ROOT]")
+        items+=("  Server binary         [$SERVER_BIN]")
+
+        items+=("▲ Back to top")
 
         if [ "$mode" = "load" ]; then
             items+=("▶ Start with these settings")
@@ -1476,160 +1306,280 @@ settings_menu() {
         items+=("Back")
 
         local previous
-        previous=$(declare -p HOST PORT STARTUP_TIMEOUT MODEL_ROOT)
-        previous="$previous"$'\n'"$(declare -p CTX NGL FLASH BATCH UBATCH PARALLEL CACHE_K CACHE_V VISION MMPROJ_PATH MTP MTP_MODE MTP_DRAFT_MAX MTP_DRAFT_FLAG SERVER_BIN LORA_ENABLED LORA_SCALE LORA_PATH TEMP TOP_P TOP_K MIN_P REASONING_BUDGET MAX_OUTPUT_TOKENS)"
+        previous=$(declare -p HOST PORT STARTUP_TIMEOUT MODEL_ROOT SERVER_BIN RUNTIME_ID RUNTIME_RECOMMENDED)
+        previous="$previous"$'\n'"$(declare -p CTX NGL FLASH BATCH UBATCH PARALLEL CACHE_K CACHE_V VISION MMPROJ_PATH MTP MTP_MODE MTP_DRAFT_MAX MTP_DRAFT_FLAG LORA_ENABLED LORA_SCALE LORA_PATH TEMP TOP_P TOP_K MIN_P REASONING_BUDGET MAX_OUTPUT_TOKENS)"
+
         local choice
-        choice=$(printf '%s
-' "${items[@]}" | gum choose --height 22)
+        choice=$(printf '%s\n' "${items[@]}" | gum choose --height 24)
 
         case "$choice" in
 
-            "Context size"*)
-                edit_input CTX \
-                    --value="$CTX" \
-                    --placeholder "8192 / 16384 / 32768 / 65536"
+            # ── Runtime fork selection ──
+            "Runtime fork"*)
+                local rt_ids rt_names selected_id
+                rt_ids=$(runtime_registry_list 2>/dev/null || echo "")
+
+                local -a menu_items=()
+                while IFS= read -r id; do
+                    [ -n "$id" ] || continue
+                    local name
+                    name=$(runtime_display_name "$id" 2>/dev/null || echo "$id")
+                    menu_items+=("$name|$id")
+                done <<< "$rt_ids"
+
+                if [ "${#menu_items[@]}" -eq 0 ]; then
+                    echo "No runtimes registered. Initialize with: prism-runtime-registry.sh init"
+                    pause; continue
+                fi
+
+                # Build display list
+                local -a display_items=()
+                local -a id_map=()
+                local idx=0
+                for entry in "${menu_items[@]}"; do
+                    local name="${entry%%|*}"
+                    local id="${entry##*|}"
+                    display_items+=("$name")
+                    id_map[$idx]="$id"
+                    idx=$((idx + 1))
+                done
+
+                # Separator and special actions
+                display_items+=("────────────────────────────")
+                display_items+=("Add runtime folder...")
+                display_items+=("Remove runtime entry...")
+                display_items+=("Refresh runtime folders...")
+                display_items+=("Runtime Management")
+                display_items+=("Back")
+
+                local rt_choice
+                rt_choice=$(printf '%s\n' "${display_items[@]}" | gum choose --height 15) || continue
+
+                case "$rt_choice" in
+                    "Add runtime folder...")
+                        add_runtime_folder_flow
+                        continue
+                        ;;
+                    "Remove runtime entry...")
+                        remove_runtime_entry_flow
+                        continue
+                        ;;
+                    "Refresh runtime folders...")
+                        echo "Refreshing runtime folders..."
+                        local ids
+                        ids=$(runtime_registry_list)
+                        while IFS= read -r id; do
+                            [ -n "$id" ] || continue
+                            local managed
+                            managed=$(runtime_registry_get "$id" "managed" 2>/dev/null || echo "false")
+                            if [ "$managed" != "true" ]; then
+                                # Re-validate external runtime
+                                local folder
+                                folder=$(runtime_folder_expanded "$id" 2>/dev/null) || continue
+                                if [ -d "$folder" ]; then
+                                    local binary
+                                    binary=$("$RUNTIME_REGISTRY" discover "$folder" 2>/dev/null | head -1) || continue
+                                    if [ -x "$binary" ]; then
+                                        runtime_registry_update "$id" "binary" "$binary"
+                                        echo "  Updated: $id -> $binary"
+                                    fi
+                                fi
+                            fi
+                        done <<< "$ids"
+                        "$RUNTIME_REGISTRY" cache-clear 2>/dev/null || true
+                        echo "Runtime refresh complete."
+                        pause; continue
+                        ;;
+                    "Runtime Management")
+                        runtime_management_menu
+                        continue
+                        ;;
+                    "Back"|"")
+                        continue
+                        ;;
+                    *)
+                        # Find the selected runtime ID
+                        local selected_idx=0 found=0
+                        for entry in "${display_items[@]}"; do
+                            if [ "$entry" = "$rt_choice" ]; then
+                                RUNTIME_ID="${id_map[$selected_idx]}"
+                                found=1
+                                break
+                            fi
+                            selected_idx=$((selected_idx + 1))
+                        done
+
+                        if [ "$found" -eq 1 ]; then
+                            # Resolve binary for this runtime
+                            if [ -z "${PMM_SERVER_BIN:-}" ]; then
+                                local new_bin
+                                new_bin=$(resolve_runtime_binary "$RUNTIME_ID" 2>/dev/null || echo "")
+                                if [ -x "$new_bin" ]; then
+                                    SERVER_BIN="$new_bin"
+                                fi
+                            fi
+                            # Probe capabilities (cached)
+                            if [ -x "$RUNTIME_REGISTRY" ]; then
+                                local runtime_bin
+                                runtime_bin=$(resolve_runtime_binary "$RUNTIME_ID" 2>/dev/null || echo "")
+                                if [ -x "$runtime_bin" ]; then
+                                    "$RUNTIME_REGISTRY" probe "$runtime_bin" true >/dev/null 2>&1 || true
+                                fi
+                            fi
+                            echo "Selected runtime: $rt_choice"
+                            pause
+                        fi
+                        ;;
+                esac
                 ;;
 
+            # ── Runtime folder ──
+            "Runtime folder"*)
+                if [ -n "$RUNTIME_ID" ] && [ "$RUNTIME_ID" != "Not selected" ]; then
+                    local folder
+                    folder=$(runtime_registry_get "$RUNTIME_ID" "folder" 2>/dev/null || echo "")
+                    if [ -n "$folder" ]; then
+                        local expanded="${folder/#\~/$HOME}"
+                        local managed
+                        managed=$(runtime_registry_get "$RUNTIME_ID" "managed" 2>/dev/null || echo "false")
+
+                        if [ "$managed" = "true" ]; then
+                            echo "Managed runtime folder: $expanded"
+                            echo "(Managed runtimes cannot be edited directly)"
+                        else
+                            local folder_choice
+                            folder_choice=$(printf 'Show folder\nChange folder\nSelect binary manually\nBack\n' | gum choose || echo "Back")
+                            case "$folder_choice" in
+                                "Show folder")
+                                    echo "Runtime folder: $expanded"
+                                    if [ -d "$expanded" ]; then
+                                        echo "Contents:"
+                                        ls -la "$expanded" 2>/dev/null || true
+                                    else
+                                        echo "Directory does not exist."
+                                    fi
+                                    pause
+                                    ;;
+                                "Change folder")
+                                    local new_folder
+                                    if new_folder=$(gum input --value="$expanded" --placeholder="/path/to/runtime/folder"); then
+                                        new_folder="${new_folder/#\~/$HOME}"
+                                        if [ -d "$new_folder" ]; then
+                                            runtime_registry_update "$RUNTIME_ID" "folder" "$new_folder"
+                                            echo "Folder updated."
+                                            # Re-discover binary
+                                            local new_bin
+                                            new_bin=$("$RUNTIME_REGISTRY" discover "$new_folder" 2>/dev/null | head -1) || {
+                                                echo "No llama-server found in new folder."
+                                                pause; continue
+                                            }
+                                            if [ -x "$new_bin" ]; then
+                                                runtime_registry_update "$RUNTIME_ID" "binary" "$new_bin"
+                                                SERVER_BIN="$new_bin"
+                                                echo "Discovered: $new_bin"
+                                            fi
+                                        else
+                                            echo "Directory not found: $new_folder"
+                                        fi
+                                    fi
+                                    pause
+                                    ;;
+                                "Select binary manually")
+                                    local bin_path
+                                    if bin_path=$(gum input --placeholder="/path/to/llama-server"); then
+                                        bin_path="${bin_path/#\~/$HOME}"
+                                        if [ -x "$bin_path" ]; then
+                                            runtime_registry_update "$RUNTIME_ID" "binary" "$bin_path"
+                                            SERVER_BIN="$bin_path"
+                                            echo "Binary set: $bin_path"
+                                        else
+                                            echo "Not executable: $bin_path"
+                                        fi
+                                    fi
+                                    pause
+                                    ;;
+                            esac
+                        fi
+                    else
+                        echo "No runtime selected."
+                        pause
+                    fi
+                fi
+                ;;
+
+            # ── Regular settings ──
+            "Context"*)
+                edit_input CTX --value="$CTX" --placeholder "8192 / 16384 / 32768 / 65536" ;;
             "GPU layers"*)
-                edit_input NGL \
-                    --value="$NGL" \
-                    --placeholder "99 = full GPU, 0 = CPU"
-                ;;
-
-            "Flash Attention"*)
-                local value
-                value=$(printf 'on
-off
-auto
-' | gum choose || true)
-                [ -n "$value" ] && FLASH="$value"
-                ;;
-
-            "Batch size"*)
-                edit_input BATCH --value="$BATCH"
-                ;;
-
-            "UBatch size"*)
-                edit_input UBATCH --value="$UBATCH"
-                ;;
-
-            "Parallel slots"*)
-                edit_input PARALLEL --value="$PARALLEL"
-                ;;
-
+                edit_input NGL --value="$NGL" --placeholder "99 = full GPU, 0 = CPU" ;;
             "KV cache K"*)
-                local value
-                value=$(printf 'f16
-bf16
-f32
-q8_0
-q4_0
-q4_1
-q5_0
-q5_1
-iq4_nl
-' | gum choose || true)
-                [ -n "$value" ] && CACHE_K="$value"
-                ;;
-
+                value=$(printf 'f16\nbf16\nf32\nq8_0\nq4_0\nq4_1\nq5_0\nq5_1\niq4_nl\n' | gum choose || true)
+                [ -n "$value" ] && CACHE_K="$value" ;;
             "KV cache V"*)
-                local value
-                value=$(printf 'f16
-bf16
-f32
-q8_0
-q4_0
-q4_1
-q5_0
-q5_1
-iq4_nl
-' | gum choose || true)
-                [ -n "$value" ] && CACHE_V="$value"
-                ;;
+                value=$(printf 'f16\nbf16\nf32\nq8_0\nq4_0\nq4_1\nq5_0\nq5_1\niq4_nl\n' | gum choose || true)
+                [ -n "$value" ] && CACHE_V="$value" ;;
+            "MTP"*)
+                MTP=$(printf 'off\non\n' | gum choose) ;;
+            "Parallel slots"*)
+                edit_input PARALLEL --value="$PARALLEL" ;;
+            "API host"*)
+                edit_input HOST --value="$HOST" ;;
+            "API port"*)
+                edit_input PORT --value="$PORT" ;;
+            "Startup timeout"*)
+                edit_input STARTUP_TIMEOUT --value="$STARTUP_TIMEOUT" ;;
 
-            "Temperature"*)
-                edit_input TEMP --value="$TEMP"
-                ;;
-
-            "Top-P"*)
-                edit_input TOP_P --value="$TOP_P"
-                ;;
-
-            "Top-K"*)
-                edit_input TOP_K --value="$TOP_K"
-                ;;
-
-            "Min-P"*)
-                edit_input MIN_P --value="$MIN_P"
-                ;;
-
-            "Reasoning budget"*)
-                edit_input REASONING_BUDGET \
-                    --value="$REASONING_BUDGET" \
-                    --placeholder="Use -1 for unlimited, 0 to disable, or a token budget"
-                ;;
-
-            "Max output tokens"*)
-                edit_input MAX_OUTPUT_TOKENS \
-                    --value="$MAX_OUTPUT_TOKENS" \
-                    --placeholder="Use -1 for unlimited, or a token budget"
-                ;;
-
-            "Vision"*)
-                local value
-                value=$(printf 'off
-on
-' | gum choose || true)
-                [ -n "$value" ] && VISION="$value"
-                ;;
-
-            "Projector path"*) edit_input MMPROJ_PATH --value="$MMPROJ_PATH" --placeholder "Empty: one adjacent mmproj" ;;
-            "MTP mode"*) MTP_MODE=$(printf 'mtp\ndraft-mtp\n' | gum choose) ;;
-            "MTP draft flag"*) MTP_DRAFT_FLAG=$(printf '%s\n' --spec-draft-n-max --draft-max | gum choose) ;;
-            "MTP draft max"*) edit_input MTP_DRAFT_MAX --value="$MTP_DRAFT_MAX" ;;
-            "MTP"*) MTP=$(printf 'off\non\n' | gum choose) ;;
-            "Backend executable"*)
+            # ── Advanced settings ──
+            "  Batch size"*)
+                edit_input BATCH --value="$BATCH" ;;
+            "  UBatch size"*)
+                edit_input UBATCH --value="$UBATCH" ;;
+            "  Flash Attention"*)
+                value=$(printf 'on\noff\nauto\n' | gum choose || true)
+                [ -n "$value" ] && FLASH="$value" ;;
+            "  Temperature"*)
+                edit_input TEMP --value="$TEMP" ;;
+            "  Top-P"*)
+                edit_input TOP_P --value="$TOP_P" ;;
+            "  Top-K"*)
+                edit_input TOP_K --value="$TOP_K" ;;
+            "  Min-P"*)
+                edit_input MIN_P --value="$MIN_P" ;;
+            "  Reasoning budget"*)
+                edit_input REASONING_BUDGET --value="$REASONING_BUDGET" --placeholder="-1 unlimited, 0 disabled" ;;
+            "  Max output tokens"*)
+                edit_input MAX_OUTPUT_TOKENS --value="$MAX_OUTPUT_TOKENS" --placeholder="-1 unlimited" ;;
+            "  Vision"*)
+                VISION=$(printf 'off\non\n' | gum choose) ;;
+            "  Projector path"*)
+                edit_input MMPROJ_PATH --value="$MMPROJ_PATH" --placeholder "Empty: auto-detect adjacent" ;;
+            "  MTP mode"*)
+                MTP_MODE=$(printf 'mtp\ndraft-mtp\n' | gum choose) ;;
+            "  MTP draft flag"*)
+                MTP_DRAFT_FLAG=$(printf '%s\n' --spec-draft-n-max --draft-max | gum choose) ;;
+            "  MTP draft max"*)
+                edit_input MTP_DRAFT_MAX --value="$MTP_DRAFT_MAX" ;;
+            "  Uncensored LoRA"*)
+                LORA_ENABLED=$(printf 'off\non\n' | gum choose) ;;
+            "  LoRA scale"*)
+                edit_input LORA_SCALE --value="$LORA_SCALE" ;;
+            "  LoRA file"*)
+                edit_input LORA_PATH --value="$LORA_PATH" ;;
+            "  Model root"*)
+                edit_input MODEL_ROOT --value="$MODEL_ROOT" ;;
+            "  Server binary"*)
                 if [ -n "${PMM_SERVER_BIN:-}" ]; then
-                    echo "PMM_SERVER_BIN controls this session. Unset it before editing the backend path."
-                    pause
-                    continue
+                    echo "PMM_SERVER_BIN controls this session."
+                else
+                    local value
+                    if ! value=$(gum input --value="$SERVER_BIN" --placeholder="/path/to/llama-server"); then continue; fi
+                    valid_input_value SERVER_BIN "$value" || continue
+                    if [ -z "$value" ] || [ ! -f "$value" ] || [ ! -x "$value" ]; then
+                        echo "Choose a valid executable." >&2
+                        pause; continue
+                    fi
+                    SERVER_BIN="$value"
                 fi
-                local value
-                if ! value=$(gum input --value="$SERVER_BIN" --placeholder="/path/to/custom/llama-server"); then continue; fi
-                valid_input_value SERVER_BIN "$value" || continue
-                if [ -z "$value" ] || [ ! -f "$value" ] || [ ! -x "$value" ]; then
-                    echo "Keep the previous backend: choose a nonempty executable file path." >&2
-                    pause
-                    continue
-                fi
-                SERVER_BIN="$value"
-                ;;
-            "API host"*) edit_input HOST --value="$HOST" ;;
-            "API port"*) edit_input PORT --value="$PORT" ;;
-            "Startup timeout"*) edit_input STARTUP_TIMEOUT --value="$STARTUP_TIMEOUT" ;;
-
-            "Uncensored LoRA"*)
-                local value
-                value=$(printf 'off
-on
-' | gum choose || true)
-                [ -n "$value" ] && LORA_ENABLED="$value"
-                ;;
-
-            "LoRA scale"*)
-                edit_input LORA_SCALE \
-                    --value="$LORA_SCALE" \
-                    --placeholder "2"
-                ;;
-
-            "LoRA file"*)
-                edit_input LORA_PATH \
-                    --value="$LORA_PATH" \
-                    --placeholder "/path/to/adapter.gguf"
-                ;;
-
-            "Model root"*)
-                edit_input MODEL_ROOT --value="$MODEL_ROOT"
                 ;;
 
             "▶ Start with these settings")
@@ -1639,21 +1589,20 @@ on
                 return 0
                 ;;
 
+            "▼ Advanced"|"▲ Back to top"|"Format"*|"Codec"*|"Model"*|"Backend"*)
+                # Non-interactive display items
+                ;;
+
             "Back"|"")
                 save_model_profile
                 save_config
                 [ -n "$CURRENT_MODEL" ] || capture_runtime_defaults
-
-                if [ "$mode" = "load" ]; then
-                    return 1
-                fi
-
+                if [ "$mode" = "load" ]; then return 1; fi
                 return 0
                 ;;
         esac
 
         if ! validate_settings; then
-            # Values originate only from Bash declare -p above, never raw input.
             eval "${previous//declare --/declare -g --}"
             pause
             continue
@@ -1663,314 +1612,624 @@ on
     done
 }
 
-quick_test() {
-    title
+# ══════════════════════════════════════════════
+# ADD RUNTIME FOLDER FLOW
+# ══════════════════════════════════════════════
+add_runtime_folder_flow() {
+    echo ""
+    echo "=== Add Runtime Folder ==="
+    echo "Point to any directory containing a llama-server binary."
+    echo ""
 
-    if ! server_health; then
-        printf '%bServer is not running.%b\n' "$C_YELLOW$C_BOLD" "$C_RESET"
-        pause
-        return
+    local folder
+    if ! folder=$(gum input --placeholder="/path/to/llama.cpp/fork"); then return 1; fi
+    [ -n "$folder" ] || { echo "No path entered."; pause; return 1; }
+
+    # Expand ~
+    folder="${folder/#\~/$HOME}"
+
+    if [ ! -d "$folder" ]; then
+        echo "ERROR: Directory does not exist: $folder" >&2
+        pause; return 1
     fi
 
+    echo "Searching for llama-server in: $folder"
+    echo ""
+
+    # Search for llama-server
+    local candidates=()
+    local candidate
+    for candidate in "$folder/bin/llama-server" "$folder/build/bin/llama-server" "$folder/build/bin/Release/llama-server" "$folder/llama-server"; do
+        if [ -x "$candidate" ] && [ -f "$candidate" ]; then
+            candidates+=("$candidate")
+            echo "  Found: $candidate"
+        fi
+    done
+
+    local chosen_binary=""
+
+    if [ "${#candidates[@]}" -eq 0 ]; then
+        echo ""
+        echo "No llama-server executable found in standard locations."
+        local no_bin_choice
+        no_bin_choice=$(printf 'Select binary manually\nChoose another folder\nBack\n' | gum choose || echo "Back")
+        case "$no_bin_choice" in
+            "Select binary manually")
+                local manual_bin
+                if ! manual_bin=$(gum input --placeholder="/path/to/llama-server"); then return 1; fi
+                manual_bin="${manual_bin/#\~/$HOME}"
+                if [ ! -x "$manual_bin" ]; then
+                    echo "Not executable: $manual_bin"
+                    pause; return 1
+                fi
+                chosen_binary="$manual_bin"
+                ;;
+            *) return 1 ;;
+        esac
+    elif [ "${#candidates[@]}" -eq 1 ]; then
+        chosen_binary="${candidates[0]}"
+        echo "Using: $chosen_binary"
+    else
+        echo ""
+        echo "Multiple candidates found. Choose one:"
+        local bin_choice
+        bin_choice=$(printf '%s\n' "${candidates[@]}" | gum choose) || return 1
+        chosen_binary="$bin_choice"
+    fi
+
+    # Validate binary
+    echo "Validating: $chosen_binary..."
+    if ! timeout 5 "$chosen_binary" --version >/dev/null 2>&1; then
+        echo "WARNING: $chosen_binary does not respond to --version."
+        echo "Continuing anyway..."
+    fi
+
+    # Detect capabilities
+    echo "Probing capabilities..."
+    if [ -x "$RUNTIME_REGISTRY" ]; then
+        "$RUNTIME_REGISTRY" probe "$chosen_binary" true >/dev/null 2>&1 || true
+        "$RUNTIME_REGISTRY" probe-formatted "$chosen_binary" 2>/dev/null || echo "(capability display unavailable)"
+    fi
+
+    echo ""
+    echo "Enter a display name for this runtime:"
+    local rt_name
+    if ! rt_name=$(gum input --placeholder="My Custom Fork"); then return 1; fi
+    [ -n "$rt_name" ] || rt_name="Custom Runtime"
+
+    # Register it
+    if type register_external_runtime &>/dev/null; then
+        local rt_id
+        rt_id=$(register_external_runtime "$folder" "$rt_name" "$chosen_binary" 2>/dev/null) || {
+            echo "Register_external_runtime failed. Falling back to manual registration..."
+
+            # Fallback manual registration
+            local safe_id
+            safe_id=$(echo "$rt_name" | sed 's/[^a-zA-Z0-9._-]/_/g')
+            local registry_dir="${XDG_CONFIG_HOME:-$HOME/.config}/prism-model-manager/runtimes"
+            mkdir -p "$registry_dir"
+            cat > "$registry_dir/$safe_id.conf" <<CONF
+id=$safe_id
+display_name=$rt_name
+folder=$folder
+managed=false
+binary=$chosen_binary
+CONF
+            rt_id="$safe_id"
+        }
+
+        if [ -n "$rt_id" ]; then
+            RUNTIME_ID="$rt_id"
+            echo ""
+            echo "Runtime registered successfully."
+            echo "  Name: $rt_name"
+            echo "  ID: $rt_id"
+            echo "  Binary: $chosen_binary"
+        fi
+    else
+        echo "Runtime registry not available."
+    fi
+
+    pause
+}
+
+# ══════════════════════════════════════════════
+# REMOVE RUNTIME ENTRY FLOW
+# ══════════════════════════════════════════════
+remove_runtime_entry_flow() {
+    echo ""
+    echo "=== Remove Runtime Entry ==="
+    echo "This removes the runtime from PMM's registry."
+    echo "It does NOT delete the runtime folder or binary."
+    echo ""
+
+    local rt_ids
+    rt_ids=$(runtime_registry_list 2>/dev/null || true)
+    [ -n "$rt_ids" ] || { echo "No registered runtimes."; pause; return 1; }
+
+    local -a choices=()
+    local -a id_map=()
+    local idx=0
+    while IFS= read -r id; do
+        [ -n "$id" ] || continue
+        local name
+        name=$(runtime_display_name "$id" 2>/dev/null || echo "$id")
+        local managed
+        managed=$(runtime_registry_get "$id" "managed" 2>/dev/null || echo "false")
+        local label="$name ($id)"
+        [ "$managed" = "true" ] && label="$label [managed]"
+        choices+=("$label")
+        id_map[$idx]="$id"
+        idx=$((idx + 1))
+    done <<< "$rt_ids"
+
+    choices+=("Back")
+
+    local remove_choice
+    remove_choice=$(printf '%s\n' "${choices[@]}" | gum choose --height 15) || return 1
+    [ "$remove_choice" = "Back" ] && return 1
+
+    # Find the ID
+    local target_id=""
+    local i=0
+    for entry in "${choices[@]}"; do
+        if [ "$entry" = "$remove_choice" ]; then
+            target_id="${id_map[$i]}"
+            break
+        fi
+        i=$((i + 1))
+    done
+
+    [ -n "$target_id" ] || return 1
+
+    local managed
+    managed=$(runtime_registry_get "$target_id" "managed" 2>/dev/null || echo "false")
+
+    if [ "$managed" = "true" ]; then
+        echo "Cannot remove built-in runtime entries via this menu."
+        echo "Use 'prism-backend-manager remove $target_id' instead."
+        pause
+        return 1
+    fi
+
+    local folder
+    folder=$(runtime_registry_get "$target_id" "folder" 2>/dev/null || echo "unknown")
+    echo ""
+    echo "Removing: $target_id"
+    echo "  Folder left intact: $folder"
+    echo ""
+
+    if gum confirm "Remove runtime '$target_id' from PMM? (folder NOT deleted)"; then
+        "$RUNTIME_REGISTRY" unregister "$target_id" 2>/dev/null || {
+            rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/prism-model-manager/runtimes/$target_id.conf"
+        }
+        echo "Removed from registry."
+        # Clear RUNTIME_ID if it was the one removed
+        if [ "$RUNTIME_ID" = "$target_id" ]; then
+            RUNTIME_ID=""
+        fi
+    fi
+    pause
+}
+
+# ══════════════════════════════════════════════
+# RUNTIME MANAGEMENT MENU
+# ══════════════════════════════════════════════
+runtime_management_menu() {
+    while true; do
+        title
+        printf '%b' "  $C_BOLD$C_WHITE"
+        printf '%s\n' "Runtime Management"
+        printf '%b' "$C_RESET"
+        printf '%b' "$C_DIM$C_GRAY"; sep; printf '%b' "$C_RESET"
+
+        local rt_ids
+        rt_ids=$(runtime_registry_list 2>/dev/null || true)
+
+        local idx=0
+        local -a display_lines=()
+        local -a menu_items=()
+
+        while IFS= read -r id; do
+            [ -n "$id" ] || continue
+            local name managed status
+            name=$(runtime_display_name "$id" 2>/dev/null || echo "$id")
+            managed=$(runtime_registry_get "$id" "managed" 2>/dev/null || echo "false")
+            status=$(runtime_status_for_display "$id" 2>/dev/null || echo "Unknown")
+
+            local status_color
+            case "$status" in
+                "Installed") status_color="$C_GREEN" ;;
+                "Not installed") status_color="$C_YELLOW" ;;
+                "Available") status_color="$C_CYAN" ;;
+                "Missing folder") status_color="$C_RED" ;;
+                *) status_color="$C_GRAY" ;;
+            esac
+
+            local type_label="Managed  "
+            [ "$managed" != "true" ] && type_label="External "
+
+            printf '  %b%-5s%b %-25s %b%s%b %b%s%b\n' \
+                "$C_DIM" "$idx)" "$C_RESET" \
+                "$name" \
+                "$type_label" \
+                "$status_color" "$status" "$C_RESET"
+
+            display_lines[$idx]="$name|$id"
+            idx=$((idx + 1))
+        done <<< "$rt_ids"
+
+        echo
+        printf '%b' "$C_DIM$C_GRAY"; sep; printf '%b' "$C_RESET"
+        echo
+
+        # Build action menu
+        local -a actions=()
+        actions+=("Install runtime...")
+        actions+=("Update runtime...")
+        actions+=("Repair runtime...")
+        actions+=("Remove runtime...")
+        actions+=("Validate external runtime...")
+        actions+=("Validate all external runtimes")
+
+        actions+=("")
+        actions+=("Register external runtime...")
+        actions+=("Show runtime details...")
+        actions+=("Refresh capability cache")
+        actions+=("Back")
+
+        local action
+        action=$(printf '%s\n' "${actions[@]}" | gum choose --height 15) || return 1
+
+        case "$action" in
+            "Install runtime...")
+                # Show only managed runtimes not installed
+                local -a install_choices=()
+                local -a install_ids=()
+                while IFS= read -r id; do
+                    [ -n "$id" ] || continue
+                    local managed
+                    managed=$(runtime_registry_get "$id" "managed" 2>/dev/null || echo "false")
+                    [ "$managed" = "true" ] || continue
+                    local name
+                    name=$(runtime_display_name "$id" 2>/dev/null || echo "$id")
+                    install_choices+=("$name ($id)")
+                    install_ids+=("$id")
+                done <<< "$rt_ids"
+                install_choices+=("Back")
+
+                local install_choice
+                install_choice=$(printf '%s\n' "${install_choices[@]}" | gum choose --height 10) || continue
+                [ "$install_choice" = "Back" ] && continue
+
+                # Find the ID
+                local target_install_id=""
+                local i=0
+                for entry in "${install_choices[@]}"; do
+                    if [ "$entry" = "$install_choice" ]; then
+                        target_install_id="${install_ids[$i]}"
+                        break
+                    fi
+                    i=$((i + 1))
+                done
+
+                if [ -n "$target_install_id" ]; then
+                    echo "Installing $target_install_id..."
+                    "$BACKEND_MANAGER" install "$target_install_id" 2>&1 || echo "Installation failed."
+                    pause
+                fi
+                ;;
+
+            "Update runtime...")
+                local update_choice
+                update_choice=$(printf '%s\n' "Standard llama.cpp" "PrismML / Bonsai" "Mirai S" "Back" | gum choose --height 6) || continue
+                case "$update_choice" in
+                    "Standard llama.cpp") "$BACKEND_MANAGER" install standard 2>&1 ;;
+                    "PrismML / Bonsai") "$BACKEND_MANAGER" install prism 2>&1 ;;
+                    "Mirai S") "$BACKEND_MANAGER" install mirai 2>&1 ;;
+                esac
+                pause
+                ;;
+
+            "Repair runtime...")
+                echo "Repair checks for missing or broken runtime binaries."
+                local repair_choice
+                repair_choice=$(printf '%s\n' "Standard llama.cpp" "PrismML / Bonsai" "Mirai S" "Back" | gum choose --height 6) || continue
+                case "$repair_choice" in
+                    "Standard llama.cpp")
+                        if "$BACKEND_MANAGER" status standard | grep -q "installed"; then
+                            echo "Standard is installed. Reinstalling..."
+                            "$BACKEND_MANAGER" install standard 2>&1 || echo "Reinstall failed."
+                        else
+                            echo "Standard not installed. Install first."
+                        fi
+                        ;;
+                    "PrismML / Bonsai")
+                        if "$BACKEND_MANAGER" status prism | grep -q "installed"; then
+                            "$BACKEND_MANAGER" install prism 2>&1 || echo "Reinstall failed."
+                        else
+                            echo "Prism not installed. Install first."
+                        fi
+                        ;;
+                    "Mirai S")
+                        if "$BACKEND_MANAGER" status mirai | grep -q "installed"; then
+                            "$BACKEND_MANAGER" install mirai 2>&1 || echo "Reinstall failed."
+                        else
+                            echo "Mirai not installed. Install first."
+                        fi
+                        ;;
+                esac
+                pause
+                ;;
+
+            "Remove runtime...")
+                local -a remove_choices=()
+                local -a remove_ids=()
+                while IFS= read -r id; do
+                    [ -n "$id" ] || continue
+                    local managed name
+                    managed=$(runtime_registry_get "$id" "managed" 2>/dev/null || echo "false")
+                    [ "$managed" = "true" ] || continue
+                    name=$(runtime_display_name "$id" 2>/dev/null || echo "$id")
+                    remove_choices+=("$name ($id)")
+                    remove_ids+=("$id")
+                done <<< "$rt_ids"
+                remove_choices+=("Back")
+
+                local remove_choice
+                remove_choice=$(printf '%s\n' "${remove_choices[@]}" | gum choose --height 10) || continue
+
+                local target_remove_id=""
+                local i=0
+                for entry in "${remove_choices[@]}"; do
+                    if [ "$entry" = "$remove_choice" ]; then
+                        target_remove_id="${remove_ids[$i]}"
+                        break
+                    fi
+                    i=$((i + 1))
+                done
+
+                if [ -n "$target_remove_id" ]; then
+                    if gum confirm "Remove $target_remove_id runtime?"; then
+                        "$BACKEND_MANAGER" remove "$target_remove_id" 2>&1
+                    fi
+                fi
+                pause
+                ;;
+
+            "Validate external runtime...")
+                # Pick an external runtime to validate
+                local -a ext_choices=()
+                local -a ext_ids=()
+                while IFS= read -r id; do
+                    [ -n "$id" ] || continue
+                    local managed
+                    managed=$(runtime_registry_get "$id" "managed" 2>/dev/null || echo "false")
+                    [ "$managed" = "true" ] && continue
+                    local name
+                    name=$(runtime_display_name "$id" 2>/dev/null || echo "$id")
+                    ext_choices+=("$name ($id)")
+                    ext_ids+=("$id")
+                done <<< "$rt_ids"
+                [ "${#ext_choices[@]}" -eq 0 ] && { echo "No external runtimes registered."; pause; continue; }
+                ext_choices+=("Back")
+
+                local ext_choice
+                ext_choice=$(printf '%s\n' "${ext_choices[@]}" | gum choose --height 10) || continue
+
+                local target_ext_id=""
+                local i=0
+                for entry in "${ext_choices[@]}"; do
+                    if [ "$entry" = "$ext_choice" ]; then
+                        target_ext_id="${ext_ids[$i]}"
+                        break
+                    fi
+                    i=$((i + 1))
+                done
+
+                if [ -n "$target_ext_id" ]; then
+                    echo "Validating $target_ext_id..."
+                    if [ -x "$RUNTIME_REGISTRY" ]; then
+                        "$RUNTIME_REGISTRY" validate "$target_ext_id" && echo "Valid!" || echo "Validation failed."
+                    fi
+                    pause
+                fi
+                ;;
+
+            "Validate all external runtimes")
+                echo "Validating all external runtimes..."
+                while IFS= read -r id; do
+                    [ -n "$id" ] || continue
+                    local managed
+                    managed=$(runtime_registry_get "$id" "managed" 2>/dev/null || echo "false")
+                    [ "$managed" = "true" ] && continue
+                    local name
+                    name=$(runtime_display_name "$id" 2>/dev/null || echo "$id")
+                    printf '  %-30s ' "$name"
+                    if [ -x "$RUNTIME_REGISTRY" ] && "$RUNTIME_REGISTRY" validate "$id" >/dev/null 2>&1; then
+                        printf 'OK\n'
+                    else
+                        printf 'FAILED\n'
+                    fi
+                done <<< "$rt_ids"
+                pause
+                ;;
+
+            "Register external runtime...")
+                add_runtime_folder_flow
+                ;;
+
+            "Show runtime details...")
+                local -a detail_choices=()
+                local -a detail_ids=()
+                while IFS= read -r id; do
+                    [ -n "$id" ] || continue
+                    local name
+                    name=$(runtime_display_name "$id" 2>/dev/null || echo "$id")
+                    detail_choices+=("$name ($id)")
+                    detail_ids+=("$id")
+                done <<< "$rt_ids"
+                detail_choices+=("Back")
+
+                local detail_choice
+                detail_choice=$(printf '%s\n' "${detail_choices[@]}" | gum choose --height 10) || continue
+
+                local target_detail_id=""
+                local i=0
+                for entry in "${detail_choices[@]}"; do
+                    if [ "$entry" = "$detail_choice" ]; then
+                        target_detail_id="${detail_ids[$i]}"
+                        break
+                    fi
+                    i=$((i + 1))
+                done
+
+                if [ -n "$target_detail_id" ]; then
+                    echo ""
+                    echo "=== Runtime Details: $(runtime_display_name "$target_detail_id" 2>/dev/null || echo "$target_detail_id") ==="
+                    echo "ID: $target_detail_id"
+                    echo "Display name: $(runtime_registry_get "$target_detail_id" "display_name" 2>/dev/null || echo "N/A")"
+                    echo "Managed: $(runtime_registry_get "$target_detail_id" "managed" 2>/dev/null || echo "N/A")"
+                    echo "Folder: $(runtime_folder_expanded "$target_detail_id" 2>/dev/null || echo "N/A")"
+                    echo "Binary: $(runtime_registry_get "$target_detail_id" "binary" 2>/dev/null || echo "Not set")"
+                    echo "Source repo: $(runtime_registry_get "$target_detail_id" "source_repo" 2>/dev/null || echo "N/A")"
+                    echo "Source ref: $(runtime_registry_get "$target_detail_id" "source_ref" 2>/dev/null || echo "N/A")"
+
+                    # Try probing capabilities
+                    local binary
+                    binary=$(resolve_runtime_binary "$target_detail_id" 2>/dev/null || echo "")
+                    if [ -x "$binary" ] && [ -x "$RUNTIME_REGISTRY" ]; then
+                        echo ""
+                        echo "Capabilities:"
+                        "$RUNTIME_REGISTRY" probe-formatted "$binary" 2>/dev/null || echo "(unavailable)"
+                    fi
+
+                    pause
+                fi
+                ;;
+
+            "Refresh capability cache")
+                "$RUNTIME_REGISTRY" cache-clear 2>/dev/null || true
+                echo "Capability cache cleared. Will re-probe on next startup."
+                pause
+                ;;
+
+            "Back"|"")
+                return 0
+                ;;
+        esac
+    done
+}
+
+# ══════════════════════════════════════════════
+# QUICK CHAT
+# ══════════════════════════════════════════════
+quick_test() {
+    title
+    if ! server_health; then
+        printf '%bServer is not running.%b\n' "$C_YELLOW$C_BOLD" "$C_RESET"
+        pause; return
+    fi
     local prompt
-    prompt=$(gum write \
-        --width 80 \
-        --height 5 \
-        --placeholder "Ask the loaded model something...")
-
+    prompt=$(gum write --width 80 --height 5 --placeholder "Ask the loaded model something...")
     [ -n "$prompt" ] || return
-
     local payload api_model
     api_model=$(curl --noproxy '*' -fsS --max-time 5 "$(api_base)/v1/models" | jq -er '.data[0].id') || {
         echo "Unable to identify the loaded API model." >&2; pause; return 1;
     }
-
-    payload=$(jq -n \
-        --arg prompt "$prompt" \
-        --arg model "$api_model" \
-        '{
-            model: $model,
-            messages: [
-                {
-                    role: "user",
-                    content: $prompt
-                }
-            ],
-            max_tokens: 1024
-        }'
-    )
-
+    payload=$(jq -n --arg prompt "$prompt" --arg model "$api_model" \
+        '{model: $model, messages: [{role: "user", content: $prompt}], max_tokens: 1024}')
     echo
     curl --noproxy '*' --connect-timeout 5 --max-time 300 --fail-with-body -sS \
         "$(api_base)/v1/chat/completions" \
-        -H 'Content-Type: application/json' \
-        -d "$payload" \
-        | jq -r '
-            .error.message // empty,
-            .choices[0].message.reasoning_content // empty,
-            .choices[0].message.content // empty,
-            "",
-            "── Performance ──",
-            "Prompt: \(.timings.prompt_per_second // 0) tok/s",
-            "Decode: \(.timings.predicted_per_second // 0) tok/s",
-            "Tokens: \(.usage.total_tokens // 0)"
-        ' || { echo 'Chat request failed; check server logs.' >&2; pause; return 1; }
-
+        -H 'Content-Type: application/json' -d "$payload" \
+        | jq -r '.error.message // empty, .choices[0].message.reasoning_content // empty, .choices[0].message.content // empty, "", "── Performance ──", "Prompt: \(.timings.prompt_per_second // 0) tok/s", "Decode: \(.timings.predicted_per_second // 0) tok/s", "Tokens: \(.usage.total_tokens // 0)"' \
+        || { echo 'Chat request failed.' >&2; pause; return 1; }
     pause
 }
 
-show_vram() {
-    memory_status
-    pause
-}
-
+# ══════════════════════════════════════════════
+# OTHER FUNCTIONS
+# ══════════════════════════════════════════════
 show_logs() {
-    if [ -f "$LOGFILE" ]; then
-        less +F "$LOGFILE"
-    else
-        echo "No server log yet."
-        pause
-    fi
+    if [ -f "$LOGFILE" ]; then less +F "$LOGFILE"; else echo "No server log yet."; pause; fi
 }
 
 open_webui() {
-    if ! server_health; then
-        printf '%bServer is not running.%b\n' "$C_YELLOW$C_BOLD" "$C_RESET"
-        pause
-        return
-    fi
-
+    if ! server_health; then printf '%bServer is not running.%b\n' "$C_YELLOW$C_BOLD" "$C_RESET"; pause; return; fi
     xdg-open "$(api_base)" >/dev/null 2>&1 &
 }
 
 raw_benchmark() {
     title
-
-    if server_pid >/dev/null || server_health; then
-        echo "Stop the loaded model first."
-        pause
-        return
-    fi
-
+    if server_pid >/dev/null || server_health; then echo "Stop the loaded model first."; pause; return; fi
     [ -x "$BENCH_BIN" ] && [ -f "$CURRENT_MODEL" ] || { echo "Benchmark binary or model missing."; pause; return 1; }
-    "$BENCH_BIN" \
-        -m "$CURRENT_MODEL" \
-        -ngl "$NGL" \
-        -fa 1 \
-        -p 512 \
-        -n 128 \
-        -r 3
-
-    pause
-}
-
-lora_scale_benchmark() {
-    title
-
-    if server_pid >/dev/null || server_health; then
-        echo "Stop the loaded model first."
-        pause
-        return
-    fi
-
-    load_model_profile
-
-    local SCORE="$SCORE_BIN"
-    local DIR
-    DIR="$STATE_DIR/benchmarks/$(date +%Y%m%d-%H%M%S)"
-    local PORT_AB="18080"
-    (HOST=127.0.0.1 PORT="$PORT_AB"; port_available) || { pause; return 1; }
-
-    mkdir -p "$DIR"
-
-    [ -f "$CURRENT_MODEL" ] && [ -f "$LORA_PATH" ] && [ -f "$SCORE" ] && [ -x "$SERVER_BIN" ] || { echo "Configure model, LoRA, runtime and scoring helper first."; pause; return 1; }
-    local SCALE PID READY
-    local -a ARGS
-    for SCALE in 0 1 1.5 2; do
-        echo
-        echo "===== Scale $SCALE ====="
-
-        ARGS=(
-            "$SERVER_BIN"
-            -m "$CURRENT_MODEL"
-            --host 127.0.0.1
-            --port "$PORT_AB"
-            -ngl "$NGL"
-            -fa "$FLASH"
-            -c "$CTX"
-            -b "$BATCH"
-            -ub "$UBATCH"
-            -np 1
-            --jinja
-        )
-
-        if [ "$SCALE" != "0" ]; then
-            ARGS+=(--lora-scaled "$LORA_PATH:$SCALE")
-        fi
-
-        (HOST=127.0.0.1 PORT="$PORT_AB"; port_available) || return 1
-        "${ARGS[@]}" >"$DIR/server-$SCALE.log" 2>&1 &
-        PID=$!
-
-        echo -n "Loading"
-
-        READY=0
-        for _ in {1..180}; do
-            if kill -0 "$PID" 2>/dev/null && curl --noproxy '*' -fsS \
-                --max-time 1 "http://127.0.0.1:$PORT_AB/health" \
-                >/dev/null 2>&1
-            then
-                READY=1
-                break
-            fi
-
-            if ! kill -0 "$PID" 2>/dev/null; then
-                break
-            fi
-
-            printf "."
-            sleep 0.5
-        done
-
-        echo
-
-        if [ "$READY" -ne 1 ]; then
-            echo "Scale $SCALE failed to load:"
-            tail -40 "$DIR/server-$SCALE.log"
-            kill "$PID" 2>/dev/null || true
-            pause
-            return
-        fi
-
-        python3 "$SCORE" run \
-            --url "http://127.0.0.1:$PORT_AB" \
-            --model "$CURRENT_MODEL" \
-            --label "scale-$SCALE" \
-            --out "$DIR/scale-$SCALE.json"
-
-        kill -TERM "$PID" 2>/dev/null || true
-        wait "$PID" 2>/dev/null || true
-        sleep 1
-    done
-
-    python3 "$SCORE" summary --dir "$DIR"
-
-    echo
-    echo "Results: $DIR"
+    "$BENCH_BIN" -m "$CURRENT_MODEL" -ngl "$NGL" -fa 1 -p 512 -n 128 -r 3
     pause
 }
 
 benchmark_model() {
     while true; do
         title
-
-        CHOICE=$(printf '%s
-' \
-            "Raw Speed Benchmark" \
-            "LoRA Scale Intelligence A/B" \
-            "Back" \
-            | gum choose --height 6)
-
+        CHOICE=$(printf '%s\n' "Raw Speed Benchmark" "Back" | gum choose --height 4)
         case "$CHOICE" in
-            "Raw Speed Benchmark")
-                raw_benchmark
-                ;;
-            "LoRA Scale Intelligence A/B")
-                lora_scale_benchmark
-                ;;
-            "Back"|"")
-                return
-                ;;
+            "Raw Speed Benchmark") raw_benchmark ;;
+            "Back"|"") return ;;
         esac
     done
 }
 
+# ══════════════════════════════════════════════
+# MAIN MENU
+# ══════════════════════════════════════════════
 main_menu() {
     while true; do
         title
 
         local running
         running=$(runtime_status)
-
-        # ── Model status panel ──
         local model_name="${CURRENT_MODEL:+$(basename "$CURRENT_MODEL")}"
-        local effective_backend effective_plugin
-        effective_backend=$(resolve_backend "$CURRENT_MODEL" 2>/dev/null || echo "Auto")
-        effective_plugin=$(resolve_plugin "$CURRENT_MODEL" 2>/dev/null || echo "None")
 
         printf '  %b%s%b\n' "$C_DIM" "MODEL" "$C_RESET"
-        printf '  %-14s ' "Status"
-        colored_status "$running"
-        printf '\n'
+        printf '  %-14s ' "Status"; colored_status "$running"; printf '\n'
+
         if [ -n "$model_name" ]; then
             printf '  %-14s %b%s%b\n' "Name" "$C_CYAN" "$model_name" "$C_RESET"
         fi
-        # Backend with install-state color
-        local backend_color="$C_WHITE"
-        case "$effective_backend" in
-            "llama.cpp")
-                if [ -x "$SERVER_BIN" ] || "$BACKEND_MANAGER" status llama.cpp 2>/dev/null | grep -q "installed:"; then
-                    backend_color="$C_GREEN"
-                else
-                    backend_color="$C_YELLOW"
-                fi
-                ;;
-        esac
-        printf '  %-14s %b%s%b\n' "Backend" "$backend_color" "$effective_backend" "$C_RESET"
 
-        # Plugin with color
-        local plugin_color="$C_WHITE"
-        case "$effective_plugin" in
-            "None") plugin_color="$C_GRAY" ;;
-        esac
-        printf '  %-14s %b%s%b\n' "Plugin" "$plugin_color" "$effective_plugin" "$C_RESET"
+        # Backend
+        local backend_color="$C_GREEN"
+        printf '  %-14s %b%s%b\n' "Backend" "$backend_color" "llama.cpp" "$C_RESET"
 
-        # Format
-        local format_str
-        format_str=$(model_format_key "$CURRENT_MODEL" "format" 2>/dev/null || echo "")
-        case "$format_str" in
-            gguf*|gguf_shard) format_str="GGUF" ;;
-            hf) format_str="HF" ;;
-            mirai_s) format_str="Mirai S" ;;
-            *) format_str="" ;;
-        esac
-        [ -n "$format_str" ] && printf '  %-14s %s\n' "Format" "$format_str"
+        # Runtime
+        if [ -n "$RUNTIME_ID" ] && [ "$RUNTIME_ID" != "Not selected" ]; then
+            local rt_display; rt_display=$(runtime_display_name "$RUNTIME_ID" 2>/dev/null || echo "$RUNTIME_ID")
+            printf '  %-14s %s\n' "Runtime" "$rt_display"
+        fi
 
+        # Codec
+        if [ -n "$CURRENT_MODEL" ]; then
+            local codec; codec=$(model_codec "$CURRENT_MODEL")
+            [ -n "$codec" ] && printf '  %-14s %b%s%b\n' "Codec" "$C_MAGENTA" "$codec" "$C_RESET"
+        fi
+
+        # Quick summary
         if [ -n "$CURRENT_MODEL" ]; then
             printf '  %-14s %s\n' "Context" "$CTX"
-            printf '  %-14s ' "Max tokens"
-            if [ "$MAX_OUTPUT_TOKENS" = -1 ]; then
-                printf '%b%s%b' "$C_GRAY" "Unlimited" "$C_RESET"
-            else
-                printf '%s' "$MAX_OUTPUT_TOKENS"
-            fi
-            printf '\n'
-            printf '  %-14s ' "Reasoning"
-            if [ "$REASONING_BUDGET" = -1 ]; then
-                printf '%b%s%b' "$C_GRAY" "Unlimited" "$C_RESET"
-            elif [ "$REASONING_BUDGET" = 0 ]; then
-                printf '%b%s%b' "$C_YELLOW" "Disabled" "$C_RESET"
-            else
-                printf '%s' "$REASONING_BUDGET"
-            fi
-            printf '\n'
+            printf '  %-14s %s\n' "GPU layers" "$NGL"
             printf '  %-14s %s\n' "MTP" "$MTP"
             printf '  %-14s %s\n' "Port" "$PORT"
         fi
+
         if [ -n "${LAST_ACTION:-}" ]; then
             local action_color="$C_GREEN"
             [[ "$LAST_ACTION" == *failed* ]] && action_color="$C_YELLOW"
-            printf '%b' "$C_DIM$C_GRAY"
-            sep
-            printf '%b' "$C_RESET"
+            printf '%b' "$C_DIM$C_GRAY"; sep; printf '%b' "$C_RESET"
             printf '  %b%s%b\n' "$action_color$C_DIM" "$LAST_ACTION" "$C_RESET"
         fi
 
-        printf '%b' "$C_DIM$C_GRAY"
-        sep
-        printf '%b' "$C_RESET"
+        printf '%b' "$C_DIM$C_GRAY"; sep; printf '%b' "$C_RESET"
 
-        # Menu items with section labels
         local choice
         choice=$(printf '%s\n' \
             "▶ Load / Switch Model" \
@@ -1979,7 +2238,7 @@ main_menu() {
             "💬 Quick Chat" \
             "🌐 Web UI" \
             "🔌 API Info" \
-            "🔧 Backend Management" \
+            "🔧 Runtime Management" \
             "📊 GPU / RAM" \
             "⚡ Benchmark" \
             "📜 Logs" \
@@ -1988,76 +2247,19 @@ main_menu() {
             | gum choose --height 15)
 
         case "$choice" in
-
-            "▶ Load / Switch Model")
-                switch_model
-                ;;
-
+            "▶ Load / Switch Model") switch_model ;;
             "⚙ Settings")
                 if [ -n "$CURRENT_MODEL" ] && { [ -f "$CURRENT_MODEL" ] || [ -d "$CURRENT_MODEL" ]; }; then load_model_profile; fi
                 settings_menu edit
                 ;;
-
-            "● Status")
-                status_screen
-                ;;
-
-            "💬 Quick Chat")
-                quick_test
-                ;;
-
-            "🌐 Web UI")
-                open_webui
-                ;;
-
-            "🔌 API Info")
-                api_ready_view
-                ;;
-
-            "🔧 Backend Management")
-                title
-                printf '%b' "$C_DIM$C_GRAY"
-                sep
-                printf '%b' "  $C_BOLD$C_WHITE"
-                printf '%s\n' "Backend Management"
-                printf '%b' "$C_RESET"
-                echo ""
-                if [ -x "$BACKEND_MANAGER" ]; then
-                    "$BACKEND_MANAGER" status
-                else
-                    echo "Backend manager not found at: $BACKEND_MANAGER"
-                fi
-                echo ""
-                local bchoice
-                bchoice=$(printf '%s\n' \
-                    "Install llama.cpp" \
-                    "Remove llama.cpp" \
-                    "Back" \
-                    | gum choose --height 8)
-                case "$bchoice" in
-                    "Install llama.cpp")
-                        "$BACKEND_MANAGER" install "llama.cpp" 2>&1
-                        pause
-                        ;;
-                    "Remove llama.cpp")
-                        gum confirm "Remove llama.cpp backend?" && "$BACKEND_MANAGER" remove "llama.cpp" 2>&1
-                        pause
-                        ;;
-                esac
-                ;;
-
-            "📊 GPU / RAM")
-                show_vram
-                ;;
-
-            "⚡ Benchmark")
-                benchmark_model
-                ;;
-
-            "📜 Logs")
-                show_logs
-                ;;
-
+            "● Status") status_screen ;;
+            "💬 Quick Chat") quick_test ;;
+            "🌐 Web UI") open_webui ;;
+            "🔌 API Info") api_ready_view ;;
+            "🔧 Runtime Management") runtime_management_menu ;;
+            "📊 GPU / RAM") memory_status; pause ;;
+            "⚡ Benchmark") benchmark_model ;;
+            "📜 Logs") show_logs ;;
             "■ Stop Model")
                 if server_pid >/dev/null; then
                     gum confirm "Stop the managed model?" && stop_server
@@ -2066,23 +2268,24 @@ main_menu() {
                 fi
                 pause
                 ;;
-
-            "Exit"|"")
-                exit 0
-                ;;
+            "Exit"|"") exit 0 ;;
         esac
     done
 }
 
+# ══════════════════════════════════════════════
+# COMMAND LINE
+# ══════════════════════════════════════════════
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     case "${1:-}" in
         --version) echo "$VERSION" ;;
-        --help) echo "Usage: prism-model-manager [--scan|--gpu|--info MODEL|--dry-run MODEL|--logs|--check|--api-ready|--state|--clear-state|--backend-status|--backend-install llama.cpp|--version]" ;;
+        --help) echo "Usage: prism-model-manager [--scan|--gpu|--info MODEL|--dry-run MODEL|--logs|--check|--api-ready|--state|--clear-state]" ;;
         --scan) scan_models ;;
         --gpu) gpu_info ;;
         --info) model_info "${2:?model path required}" ;;
         --dry-run)
             CURRENT_MODEL="${2:?model path required}"
+            load_model_profile
             preflight || exit 1
             printf '%q ' "${SERVER_ARGS[@]}"; printf '\n' ;;
         --logs) show_logs ;;
@@ -2092,20 +2295,6 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
         --api-ready) api_ready_status ;;
         --state) runtime_state_status ;;
         --clear-state) clear_stale_state ;;
-        --backend-status)
-            if [ -x "$BACKEND_MANAGER" ]; then
-                "$BACKEND_MANAGER" status
-            else
-                echo "Backend manager not found."
-            fi ;;
-        --backend-install)
-            local b="${2:-}"
-            [ -n "$b" ] || { echo "Usage: prism-model-manager --backend-install llama.cpp" >&2; exit 1; }
-            if [ -x "$BACKEND_MANAGER" ]; then
-                "$BACKEND_MANAGER" install "$b"
-            else
-                echo "Backend manager not found." >&2; exit 1
-            fi ;;
         "")
             for dependency in gum curl jq less find sha256sum python3 flock timeout; do
                 command -v "$dependency" >/dev/null || { echo "Missing dependency: $dependency" >&2; exit 1; }
