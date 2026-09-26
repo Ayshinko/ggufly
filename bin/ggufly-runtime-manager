@@ -1,38 +1,38 @@
 #!/usr/bin/env bash
-# prism-backend-manager — PMM runtime installation, update, repair and removal
+# ggufly-runtime-manager — GGUFly runtime installer, updater, remover
 #
 # Architecture:
-#   - v4 is GGUF + llama.cpp focused
+#   - GGUFly is GGUF + llama.cpp focused
 #   - No vLLM or Python plugin support
 #   - Managed runtimes: standard (llama.cpp), prism (PrismML/Bonsai), mirai (Mirai S)
 #   - External runtimes: any llama-server binary folder
-#   - Uses prism-runtime-registry.sh for all runtime operations
+#   - Uses ggufly-runtime-registry.sh for all runtime operations
 #
 # Usage:
-#   prism-backend-manager status [runtime-id]
-#   prism-backend-manager install [standard|prism|mirai]
-#   prism-backend-manager remove [standard|prism|mirai]
-#   prism-backend-manager detect
+#   ggufly-runtime-manager status [runtime-id]
+#   ggufly-runtime-manager install [standard|prism|mirai]
+#   ggufly-runtime-manager remove [standard|prism|mirai]
+#   ggufly-runtime-manager detect
 #
 set -uo pipefail
 umask 077
 
 # ── Resolve paths ─────────────────────────────
 SCRIPT_DIR=$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/prism-model-manager"
-STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/prism-model-manager"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ggufly"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ggufly"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 
-BACKENDS_DIR="$DATA_HOME/prism-model-manager/backends"
+BACKENDS_DIR="$DATA_HOME/ggufly/backends"
 LLAMA_DIR="$BACKENDS_DIR/llama.cpp"
 DOWNLOAD_CACHE="$STATE_DIR/downloads"
-SOURCE_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/prism-model-manager/sources"
+SOURCE_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/ggufly/sources"
 
 COMPAT_FILE="${COMPAT_FILE:-$SCRIPT_DIR/../compatibility.json}"
 [ -f "$COMPAT_FILE" ] || COMPAT_FILE="$SCRIPT_DIR/compatibility.json"
-[ -f "$COMPAT_FILE" ] || COMPAT_FILE="/usr/local/share/prism-model-manager/compatibility.json"
+[ -f "$COMPAT_FILE" ] || COMPAT_FILE="/usr/local/share/ggufly/compatibility.json"
 
-RUNTIME_REGISTRY="$SCRIPT_DIR/prism-runtime-registry.sh"
+RUNTIME_REGISTRY="$SCRIPT_DIR/ggufly-runtime-registry.sh"
 
 VERBOSE="${PMM_VERBOSE:-0}"
 
@@ -561,7 +561,7 @@ remove_runtime() {
         fi
     else
         log "Removing non-managed runtimes is not supported by this command."
-        log "Use 'prism-runtime-registry.sh unregister $runtime_id' to remove the registry entry."
+        log "Use 'ggufly-runtime-registry.sh unregister $runtime_id' to remove the registry entry."
     fi
 }
 
@@ -749,7 +749,7 @@ case "${1:-}" in
                 install_mirai
                 ;;
             *)
-                echo "Usage: prism-backend-manager install [standard|prism|mirai]" >&2
+                echo "Usage: ggufly-runtime-manager install [standard|prism|mirai]" >&2
                 exit 1
                 ;;
         esac
@@ -759,20 +759,20 @@ case "${1:-}" in
             standard|prism|mirai) remove_runtime "$2" ;;
             llama.cpp) remove_runtime "standard" ;;
             *)
-                echo "Usage: prism-backend-manager remove [standard|prism|mirai]" >&2
+                echo "Usage: ggufly-runtime-manager remove [standard|prism|mirai]" >&2
                 exit 1
                 ;;
         esac
         ;;
     *)
         echo "Usage:"
-        echo "  prism-backend-manager detect              Print system detection JSON"
-        echo "  prism-backend-manager status [runtime]    Show installation status"
-        echo "  prism-backend-manager install [standard|prism|mirai]  Install a runtime"
-        echo "  prism-backend-manager remove [standard|prism|mirai]   Remove a runtime"
+        echo "  ggufly-runtime-manager detect              Print system detection JSON"
+        echo "  ggufly-runtime-manager status [runtime]    Show installation status"
+        echo "  ggufly-runtime-manager install [standard|prism|mirai]  Install a runtime"
+        echo "  ggufly-runtime-manager remove [standard|prism|mirai]   Remove a runtime"
         echo ""
-        echo "v4 GGUF-focused edition. No vLLM support."
-        echo "Use prism-runtime-registry.sh for runtime registration."
+        echo "GGUFly GGUF-focused edition. No vLLM support."
+        echo "Use ggufly-runtime-registry.sh for runtime registration."
         exit 1
         ;;
 esac

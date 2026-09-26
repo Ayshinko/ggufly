@@ -5,7 +5,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
-    'backend_info', ROOT / 'bin/prism-backend-info.py')
+    'backend_info', ROOT / 'bin/ggufly-backend-info.py')
 backend_info = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(backend_info)
 

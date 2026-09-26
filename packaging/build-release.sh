@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# build-release.sh — Build PMM 4.0.0 Release Archive
+# build-release.sh — Build GGUFly 1.0.0-dev Release Archive
 #
 # Usage: ./packaging/build-release.sh [--offline] [OUTDIR]
 #
 # Modes:
-#   standard (default):  PMM scripts + compatibility manifest.
+#   standard (default):  GGUFly scripts + compatibility manifest.
 #                         llama.cpp downloaded on first use.
 #                         Small archive (~200 KB).
 #
 #   --offline:           Standard + bundled llama.cpp CUDA build.
-#                         Larger archive (~130 MB + PMM scripts).
+#                         Larger archive (~130 MB + GGUFly scripts).
 #                         Suitable for systems without internet at install time.
 #
 # Output (in OUTDIR, default dist/):
-#   prism-model-manager-4.0.0-linux-x86_64-standard.tar.gz   (~200 KB)
-#   prism-model-manager-4.0.0-linux-x86_64-offline.tar.gz    (~49 MB)
+#   ggufly-1.0.0-dev-linux-x86_64-standard.tar.gz   (~200 KB)
+#   ggufly-1.0.0-dev-linux-x86_64-offline.tar.gz    (~49 MB)
 #   ...sha256
 #   ...sha256.manifest
 #
@@ -26,28 +26,28 @@ OFFLINE=0
 
 if [ "${1:-}" = "--offline" ]; then
     OFFLINE=1
-    ARCHIVE_NAME="prism-model-manager-3.0-linux-x86_64-cuda"
+    ARCHIVE_NAME="ggufly-1.0.0-dev-linux-x86_64-cuda"
 elif [ -n "${1:-}" ] && [ "${1#--}" != "offline" ]; then
     OUTDIR="$1"
 fi
 
-PMM_VER=$(cd "$ROOT" && git describe --tags --always 2>/dev/null || echo "3.4.0")
-STANDARD_NAME="prism-model-manager-${PMM_VER}-linux-x86_64-standard"
-OFFLINE_NAME="prism-model-manager-${PMM_VER}-linux-x86_64-offline"
+GGUFLY_VER=$(cd "$ROOT" && git describe --tags --always 2>/dev/null || echo "1.0.0-dev")
+STANDARD_NAME="ggufly-${GGUFLY_VER}-linux-x86_64-standard"
+OFFLINE_NAME="ggufly-${GGUFLY_VER}-linux-x86_64-offline"
 
-echo "=== PMM ${PMM_VER} Release Builder ==="
+echo "=== GGUFly ${GGUFLY_VER} Release Builder ==="
 echo "Root:      $ROOT"
 echo "Output:    $OUTDIR"
 echo "Mode:      $([ "$OFFLINE" = 1 ] && echo 'OFFLINE (bundled llama.cpp)' || echo 'STANDARD (online-only)')"
 echo ""
 
-# ── 1. Validate PMM source ───────────────────
+# ── 1. Validate GGUFly source ───────────────────
 
-[ -d "$ROOT/bin" ] || { echo "ERROR: PMM bin/ not found"; exit 1; }
-[ -f "$ROOT/bin/prism-model-manager" ] || { echo "ERROR: prism-model-manager missing"; exit 1; }
-[ -f "$ROOT/bin/prism-backend-manager" ] || { echo "ERROR: prism-backend-manager missing"; exit 1; }
+[ -d "$ROOT/bin" ] || { echo "ERROR: GGUFly bin/ not found"; exit 1; }
+[ -f "$ROOT/bin/ggufly" ] || { echo "ERROR: ggufly missing"; exit 1; }
+[ -f "$ROOT/bin/ggufly-runtime-manager" ] || { echo "ERROR: ggufly-runtime-manager missing"; exit 1; }
 [ -f "$ROOT/compatibility.json" ] || { echo "ERROR: compatibility.json missing"; exit 1; }
-echo "PMM source:     OK"
+echo "GGUFly source:     OK"
 
 # ── 2. Staging ────────────────────────────────
 
@@ -64,14 +64,14 @@ build_archive() {
 
     echo "--- Building: $archive_name ---"
 
-    # PMM application files
-    cp "$ROOT/bin/prism-model-manager" "$archive_dir/bin/"
-    cp "$ROOT/bin/prism-backend-manager" "$archive_dir/bin/"
-    for py in prism-backend-detect.py prism-model-detect.py \
-              prism-lora-ab-score.py prism-gguf-info.py prism-backend-info.py; do
+    # GGUFly application files
+    cp "$ROOT/bin/ggufly" "$archive_dir/bin/"
+    cp "$ROOT/bin/ggufly-runtime-manager" "$archive_dir/bin/"
+    for py in ggufly-model-detect.py \
+              prism-lora-ab-score.py ggufly-gguf-info.py ggufly-backend-info.py; do
         [ -f "$ROOT/bin/$py" ] && cp "$ROOT/bin/$py" "$archive_dir/bin/"
     done
-    echo "  PMM scripts: OK"
+    echo "  GGUFly scripts: OK"
 
     # Compatibility manifest
     cp "$ROOT/compatibility.json" "$archive_dir/compatibility.json"
@@ -91,7 +91,7 @@ build_archive() {
     cp "$ROOT/examples/config.env.example" "$archive_dir/share/doc/" 2>/dev/null || true
 
     # Version file
-    echo "$PMM_VER" > "$archive_dir/VERSION"
+    echo "$GGUFLY_VER" > "$archive_dir/VERSION"
 
     # Offline: bundle llama.cpp backend
     if [ "$include_backend" = 1 ]; then
@@ -130,7 +130,7 @@ build_archive() {
         cat > "$archive_dir/share/doc/LICENSE-bundled-backend" << 'LICEOF'
 Bundled llama-server Backend — Attribution
 ===========================================
-See the README and PMM documentation for full attribution.
+See the README and GGUFly documentation for full attribution.
 This package includes a compiled llama-server binary from
 the PrismML-Eng/llama.cpp fork (MIT licensed).
 LICEOF

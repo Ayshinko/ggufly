@@ -1,6 +1,29 @@
 # Changelog
 
-## 3.5.1 — 2026-09-26
+> **Note:** Starting with version 1.0.0-dev, this project has been renamed from **Prism Model Manager** to **GGUFly**. Earlier entries below are listed under their original project name.
+
+## GGUFly 1.0.0-dev — 2026-09-27
+
+- **Product rename:** Prism Model Manager → GGUFly. New identity for the focused GGUF + llama.cpp edition.
+- **New CLI name:** `ggufly` (short alias: `ggfly`, deprecated alias: `pmm`).
+- **New XDG namespace:** `~/.config/ggufly/`, `~/.local/share/ggufly/`, `~/.local/state/ggufly/`, `~/.cache/ggufly/`.
+- **New environment variables:** `GGUFLY_SERVER_BIN`, `GGUFLY_MODEL_ROOT`, `GGUFLY_BENCH_BIN` (with PMM_* fallback).
+- **Runtime registry:** External runtime folders as first-class citizens. Arbitrary llama.cpp fork paths can be registered and selected.
+- **Explicit runtime selection:** No "Auto" mode. User always chooses the runtime fork (Standard, PrismML/Bonsai, Mirai S, or external).
+- **Capability probing:** Automatically parses `llama-server --help` to detect available flags and features per build.
+- **Compatibility states:** KNOWN_COMPATIBLE, KNOWN_INCOMPATIBLE, UNKNOWN. UNKNOWN is not unsupported.
+- **Codec detection improvement:** Expanded GGML type mapping includes Q1_0 (40), Q2_0 (41), and extended ternary types.
+- **First-run migration:** Non-destructive copy of old PMM config to new GGUFly paths.
+- **Built-in runtime support:** Standard llama.cpp, PrismML/Bonsai, Mirai S.
+- **vLLM branch preserved:** `experimental/vllm` maintained with full multi-backend support.
+- **Installer:** Updated for GGUFly names, XDG paths, desktop entries. Legacy PMM cleanup during uninstall.
+- **All regression tests pass:** 81 Python tests, 15 shell integration tests.
+
+---
+
+## Earlier releases (as Prism Model Manager)
+
+### 3.5.1 — 2026-09-26
 
 - **vLLM + Mirai S integration:** Complete backend management for HuggingFace
   directory models and Mirai S trellis-quantized models.

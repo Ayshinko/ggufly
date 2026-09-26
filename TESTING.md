@@ -1,4 +1,4 @@
-# 3.4.0 release verification
+# GGUFly Test Suite
 
 Checks use temporary HOME/XDG directories, synthetic GGUF headers, fake backend
 help and test-owned Python HTTP servers or sleep processes. Existing model files,
@@ -7,20 +7,21 @@ are not modified. No real model is loaded and no benchmark is executed.
 
 ## Automated checks (fixture-based)
 
-- `bash -n` syntax: PASS for `bin/prism-model-manager`, `bin/prism-backend-manager`,
+- `bash -n` syntax: PASS for `bin/ggufly`, `bin/ggufly-runtime-manager`,
   `install.sh`, `uninstall.sh`, `packaging/build-release.sh` and `tests/test.sh`.
-- Python syntax/AST compilation: PASS for `bin/prism-backend-detect.py`,
-  `bin/prism-model-detect.py`, `bin/prism-backend-info.py`, `bin/prism-gguf-info.py`,
+- Python syntax/AST compilation: PASS for `bin/ggufly-model-detect.py`,
+  `bin/ggufly-backend-info.py`, `bin/ggufly-gguf-info.py`,
   `bin/prism-lora-ab-score.py`
-- Python regression suite: **55 tests PASS**
-  (`test_metadata.py` ×4, `test_backend_info.py` ×10, `test_runtime.py` ×41).
+- Python regression suite: **80 tests PASS**
+  (`test_metadata.py` ×4, `test_backend_info.py` ×10, `test_runtime.py` ×53,
+   `test_download.py` ×12, `test_gum_tui.py` ×1).
 - Shell integration suite (`tests/test.sh`): PASS.
 - `git diff --check`: PASS (no whitespace errors).
 
 Run from the repository root:
 
 ```bash
-bash -n bin/prism-model-manager bin/prism-backend-manager install.sh uninstall.sh tests/test.sh packaging/build-release.sh
+bash -n bin/ggufly bin/ggufly-runtime-manager install.sh uninstall.sh tests/test.sh packaging/build-release.sh
 bash tests/test.sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py' -v
 git diff --check
@@ -40,7 +41,7 @@ Existing tests cover:
 - `--api-ready`, `--dry-run`, `--state`, `--clear-state`
 - Install, second-install rejection, uninstall, retained data
 
-New coverage (v3.4.0):
+New coverage (1.0.0-dev):
 - Model format detection (GGUF, HuggingFace, Mirai S)
 - GPU/environment detection (compute cap, CUDA, Python ABI)
 - Backend manager status tracking (llama.cpp, vLLM, Mirai S)
@@ -71,12 +72,12 @@ at install time. No mock substitutes for real installation and inference exist.
 
 ```bash
 # Syntax
-bash -n bin/prism-model-manager bin/prism-backend-manager install.sh uninstall.sh tests/test.sh packaging/build-release.sh
+bash -n bin/ggufly bin/ggufly-runtime-manager install.sh uninstall.sh tests/test.sh packaging/build-release.sh
 
 # Shell integration
 bash tests/test.sh
 
-# Python regression (55 tests)
+# Python regression (80 tests)
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 # Whitespace

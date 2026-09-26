@@ -4,6 +4,7 @@ from pathlib import Path
 import select
 import shutil
 import signal
+import struct
 import tempfile
 import time
 import unittest
@@ -14,10 +15,9 @@ class GumTerminalTests(unittest.TestCase):
     def test_visible_editing_and_cancel(self):
         import fcntl
         import pty
-        import struct
         import termios
 
-        source = Path(__file__).resolve().parents[1] / 'bin/prism-model-manager'
+        source = Path(__file__).resolve().parents[1] / 'bin/ggufly'
         cases = (
             (b'\x01\x0b8192', b'\r', b'8192'),  # Ctrl+A, Ctrl+K: replace
             (b'\x7f', b'\r', b'409'),           # Backspace at end

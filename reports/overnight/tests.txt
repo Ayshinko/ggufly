@@ -1,0 +1,243 @@
+============================================================
+GGUFly — FULL COMPREHENSIVE TEST SUITE REPORT
+============================================================
+
+=== Phase 12: Running full test suite ===
+Date: Sun Sep 27 01:24:33 AM CEST 2026
+
+--- 1. Shell syntax check ---
+Shell syntax: PASS
+--- 2. Python syntax check ---
+Python syntax: PASS
+--- 3. Shell integration ---
+PASS: scan excludes adapters, projectors and partial downloads; supports spaces
+PASS: four quantization hints plus unknown fallback
+PASS: escaped config and per-model profile round trip; private file permissions
+PASS: command arrays, optional LoRA/vision/reasoning flags and invalid context
+PASS: dry-run never executes runtime
+PASS: Ada architecture, missing driver fallback and less +F log viewer
+PASS: stale PID identity rejected
+Loading model two.gguf on 127.0.0.1:9999 (timeout 180s)...
+Model ready: http://127.0.0.1:9999/v1
+Stopping managed server PID 374007...
+Stopped.
+PASS: start and stop lifecycle with a fake process only
+=== GGUFly 1.0.0-dev Installer ===
+Mode:      ONLINE (download backends on first use)
+Prefix:    /tmp/tmp.DOFflryvUA/install prefix
+Root:      /home/ayshinko/AI-Workspace/pmm-source
+
+Architecture:   OK (x86_64)
+System:         OK (Linux)
+Dependencies:   OK
+
+--- Installing core ---
+  Installed: /tmp/tmp.DOFflryvUA/install prefix/bin/ggufly
+  Installed: /tmp/tmp.DOFflryvUA/install prefix/bin/ggufly-runtime-manager
+  Installed: /tmp/tmp.DOFflryvUA/install prefix/bin/ggufly-runtime-registry.sh
+  Installed: /tmp/tmp.DOFflryvUA/install prefix/bin/ggufly-model-detect.py
+  Installed: /tmp/tmp.DOFflryvUA/install prefix/bin/ggufly-gguf-info.py
+  Installed: /tmp/tmp.DOFflryvUA/install prefix/bin/ggufly-backend-info.py
+  Installed: /tmp/tmp.DOFflryvUA/install prefix/share/ggufly/compatibility.json
+  Created:    /tmp/tmp.DOFflryvUA/install prefix/bin/ggfly -> ggufly
+  Created:    /tmp/tmp.DOFflryvUA/install prefix/bin/pmm -> ggufly (deprecated alias)
+  Installed:  /tmp/tmp.DOFflryvUA/install prefix/bin/ggufly-launcher
+  Installed:  Desktop entries
+Built-in runtimes initialized.
+  Initialized: Runtime registry
+  Found:      /tmp/tmp.DOFflryvUA/config/ggufly/config.env (existing config preserved)
+
+=== Installation Complete ===
+
+Run:  ggufly
+Or:   pmm
+
+To add to PATH:
+  echo 'export PATH="$PATH:/tmp/tmp.DOFflryvUA/install prefix/bin"' >> ~/.bashrc
+  export PATH="$PATH:/tmp/tmp.DOFflryvUA/install prefix/bin"
+
+Quick start:
+  1. Set your model directory in Settings -> Advanced -> Model root
+  2. Install a runtime: ggufly-runtime-manager install standard
+  3. Select a model and a runtime fork
+  4. Start the model
+
+Backend management:
+  ggufly-runtime-manager status           # Show installed runtimes
+  ggufly-runtime-manager install standard  # Install standard llama.cpp
+  ggufly-runtime-manager install prism     # Install PrismML/Bonsai fork
+  ggufly-runtime-manager install mirai     # Install Mirai S fork
+
+Uninstall:  /home/ayshinko/AI-Workspace/pmm-source/uninstall.sh
+=== GGUFly 1.0.0-dev Installer ===
+Mode:      ONLINE (download backends on first use)
+Prefix:    /tmp/tmp.DOFflryvUA/install prefix
+Root:      /home/ayshinko/AI-Workspace/pmm-source
+
+Architecture:   OK (x86_64)
+System:         OK (Linux)
+Dependencies:   OK
+
+Existing GGUFly installation detected: /tmp/tmp.DOFflryvUA/install prefix/bin/ggufly (v1.0.0-dev)
+Installation cancelled.
+=== GGUFly Uninstaller ===
+  Removed:    /tmp/tmp.DOFflryvUA/install prefix/bin/ggufly
+  Removed:    /tmp/tmp.DOFflryvUA/install prefix/bin/ggufly-runtime-manager
+  Removed:    /tmp/tmp.DOFflryvUA/install prefix/bin/ggufly-runtime-registry.sh
+  Removed:    /tmp/tmp.DOFflryvUA/install prefix/bin/ggufly-model-detect.py
+  Removed:    /tmp/tmp.DOFflryvUA/install prefix/bin/ggufly-gguf-info.py
+  Removed:    /tmp/tmp.DOFflryvUA/install prefix/bin/ggufly-backend-info.py
+  Removed:    /tmp/tmp.DOFflryvUA/install prefix/bin/pmm
+  Removed:    /tmp/tmp.DOFflryvUA/install prefix/share/ggufly
+  Removed:    /tmp/tmp.DOFflryvUA/data/applications/ggufly.desktop
+  Removed:    /tmp/tmp.DOFflryvUA/data/applications/ggufly-terminal.desktop
+
+=== Uninstall Complete ===
+  Files removed:  10
+  Files kept:      0
+
+
+Configuration preserved: /tmp/tmp.DOFflryvUA/config/ggufly
+Logs preserved:          /tmp/tmp.DOFflryvUA/state/ggufly
+
+To fully remove all data: /home/ayshinko/AI-Workspace/pmm-source/uninstall.sh --all
+=== GGUFly Uninstaller ===
+
+=== Uninstall Complete ===
+  Files removed:  0
+  Files kept:      0
+
+
+Configuration preserved: /tmp/tmp.DOFflryvUA/config/ggufly
+Logs preserved:          /tmp/tmp.DOFflryvUA/state/ggufly
+
+To fully remove all data: /home/ayshinko/AI-Workspace/pmm-source/uninstall.sh --all
+PASS: installation, overwrite refusal, installed execution, uninstall, retained data and idempotence
+PASS: api_models_info returns the running model id from a well-formed /v1/models body
+PASS: api_models_info returns "malformed" for a 200 with empty models list
+PASS: api_models_info returns "malformed" for a non-JSON body
+PASS: api_models_info returns "unavailable" when curl fails (connection refused)
+PASS: api_ready_lines renders base URL, reachability and running model ID
+PASS: api_ready_lines degrades gracefully when the API is unreachable
+PASS: api_ready_lines reports malformed API responses without crashing
+PASS: --api-ready exits nonzero when the API is unreachable
+PASS: set -u startup safety: no unbound variables with empty config
+PASS: float-safe disk comparison (32.0, 11.5, 32 integer)
+PASS: disk check uses target filesystem (shutil.disk_usage)
+PASS: no hard-coded dev paths in source files
+All tests passed; no real model or GPU workload executed.
+
+--- 4. Python regression ---
+test_ansi_tabs_indentation_blank_lines_and_headings (test_backend_info.BackendHelpParserTests.test_ansi_tabs_indentation_blank_lines_and_headings) ... ok
+test_argument_only_and_complex_usage_forms (test_backend_info.BackendHelpParserTests.test_argument_only_and_complex_usage_forms) ... ok
+test_boolean_flag_has_empty_usage_and_description (test_backend_info.BackendHelpParserTests.test_boolean_flag_has_empty_usage_and_description) ... ok
+test_modern_fixture (test_backend_info.BackendHelpParserTests.test_modern_fixture) ... ok
+test_multiline_alias_declaration (test_backend_info.BackendHelpParserTests.test_multiline_alias_declaration) ... ok
+test_prose_flag_mentions_are_not_advertised (test_backend_info.BackendHelpParserTests.test_prose_flag_mentions_are_not_advertised) ... ok
+test_realistic_modern_help_edges (test_backend_info.BackendHelpParserTests.test_realistic_modern_help_edges) ... ok
+test_removed_aliases_share_usage_description_and_state (test_backend_info.BackendHelpParserTests.test_removed_aliases_share_usage_description_and_state) ... ok
+test_removed_wording_variants (test_backend_info.BackendHelpParserTests.test_removed_wording_variants) ... ok
+test_wrapped_description_and_optional_enum_usage (test_backend_info.BackendHelpParserTests.test_wrapped_description_and_optional_enum_usage) ... ok
+test_codec_detection_known (test_download.DiskCheckRegressionTests.test_codec_detection_known)
+GGUF with general.file_type should populate codec field. ... ok
+test_codec_detection_unknown_for_minimal_gguf (test_download.DiskCheckRegressionTests.test_codec_detection_unknown_for_minimal_gguf)
+Minimal GGUF (no metadata keys) should return Unknown codec. ... ok
+test_disk_check_low_decimal_triggers_warning (test_download.DiskCheckRegressionTests.test_disk_check_low_decimal_triggers_warning)
+disk_free=11.5 must trigger the low-space warning. ... ok
+test_disk_check_path_is_target_not_home (test_download.DiskCheckRegressionTests.test_disk_check_path_is_target_not_home)
+Disk check path must be CURRENT_MODEL directory, not $HOME. ... ok
+test_disk_check_uses_shutil_disk_usage (test_download.DiskCheckRegressionTests.test_disk_check_uses_shutil_disk_usage)
+Disk check must use shutil.disk_usage on the target path. ... ok
+test_disk_check_with_decimal_value_does_not_crash (test_download.DiskCheckRegressionTests.test_disk_check_with_decimal_value_does_not_crash)
+disk_free=32.0 must not cause Bash 'integer expected' error. ... ok
+test_disk_check_with_integer_value_works (test_download.DiskCheckRegressionTests.test_disk_check_with_integer_value_works)
+disk_free=32 (integer) must work correctly too. ... ok
+test_ggufly_gguf_info_output (test_download.DiskCheckRegressionTests.test_ggufly_gguf_info_output)
+ggufly-gguf-info.py must read minimal GGUF without error. ... ok
+test_no_hardcoded_ayshinko_paths_in_backend_manager (test_download.DiskCheckRegressionTests.test_no_hardcoded_ayshinko_paths_in_backend_manager)
+Backend manager must not contain /home/ayshinko or AI-Workspace. ... ok
+test_no_hardcoded_ayshinko_paths_in_source (test_download.DiskCheckRegressionTests.test_no_hardcoded_ayshinko_paths_in_source)
+Source code must not contain /home/ayshinko or AI-Workspace/pmm-source. ... ok
+test_runtime_registry_source (test_download.DiskCheckRegressionTests.test_runtime_registry_source)
+Runtime registry must source cleanly. ... ok
+test_vram_12282_is_12gb_class (test_download.DiskCheckRegressionTests.test_vram_12282_is_12gb_class)
+12282 MiB VRAM must be accepted as 12GB-class GPU (no false warning). ... ok
+test_vram_8192_is_not_12gb_class (test_download.DiskCheckRegressionTests.test_vram_8192_is_not_12gb_class)
+8192 MiB VRAM must correctly be flagged as below 12GB-class. ... ok
+test_visible_editing_and_cancel (test_gum_tui.GumTerminalTests.test_visible_editing_and_cancel) ... ok
+test_invalid_file_type (test_metadata.MetadataTests.test_invalid_file_type) ... ok
+test_rejects_unsupported_headers_and_excessive_counts (test_metadata.MetadataTests.test_rejects_unsupported_headers_and_excessive_counts) ... ok
+test_truncation (test_metadata.MetadataTests.test_truncation) ... ok
+test_types (test_metadata.MetadataTests.test_types) ... ok
+test_llamacpp_menu_omits_vllm_only (test_runtime.BackendAwareMenuTests.test_llamacpp_menu_omits_vllm_only)
+llama.cpp menu must NOT show vLLM-only settings. ... ok
+test_external_model_root_path_resolution (test_runtime.FilePathRegressionTests.test_external_model_root_path_resolution)
+Selected model from external root must resolve to absolute path. ... ok
+test_external_model_root_scan (test_runtime.FilePathRegressionTests.test_external_model_root_scan)
+scan_models must find GGUF models under an external GGUFLY_MODEL_ROOT. ... ok
+test_preflight_rejects_missing_path (test_runtime.FilePathRegressionTests.test_preflight_rejects_missing_path)
+preflight must reject a non-existent CURRENT_MODEL. ... ok
+test_all_shared_input_handlers_reject_help_and_failure (test_runtime.GumInputSafetyTests.test_all_shared_input_handlers_reject_help_and_failure) ... ok
+test_input_calls_do_not_redirect_interactive_ui (test_runtime.GumInputSafetyTests.test_input_calls_do_not_redirect_interactive_ui) ... ok
+test_safe_assign_preserves_value_on_gum_failure (test_runtime.GumInputSafetyTests.test_safe_assign_preserves_value_on_gum_failure)
+When gum input exits non-zero, the previous value must be preserved. ... ok
+test_separator_locale_and_utf8_bytes (test_runtime.GumInputSafetyTests.test_separator_locale_and_utf8_bytes) ... ok
+test_build_command_uses_profile_values (test_runtime.ProfileClobberRegressionTests.test_build_command_uses_profile_values)
+build_command must use values from the loaded model profile. ... ok
+test_first_select_saves_and_loads (test_runtime.ProfileClobberRegressionTests.test_first_select_saves_and_loads)
+First time selecting a model must load (not save over) existing profile. ... ok
+test_same_model_preserves_profile (test_runtime.ProfileClobberRegressionTests.test_same_model_preserves_profile)
+Re-selecting the same model must preserve its existing profile values. ... ok
+test_switch_model_saves_previous (test_runtime.ProfileClobberRegressionTests.test_switch_model_saves_previous)
+Switching from model A to model B must save model A's current settings. ... ok
+test_api_models_info_selects_loaded_model_and_rejects_unreachable (test_runtime.RuntimeTests.test_api_models_info_selects_loaded_model_and_rejects_unreachable) ... ok
+test_backend_override_precedence_and_edit_lock (test_runtime.RuntimeTests.test_backend_override_precedence_and_edit_lock) ... ok
+test_bad_candidate_does_not_stop_model (test_runtime.RuntimeTests.test_bad_candidate_does_not_stop_model) ... ok
+test_boot_identity_mismatch_is_not_managed (test_runtime.RuntimeTests.test_boot_identity_mismatch_is_not_managed) ... ok
+test_cancelled_backend_edit_preserves_saved_path (test_runtime.RuntimeTests.test_cancelled_backend_edit_preserves_saved_path) ... ok
+test_cancelled_switch_does_not_stop_model (test_runtime.RuntimeTests.test_cancelled_switch_does_not_stop_model) ... ok
+test_description_reference_does_not_advertise_flag (test_runtime.RuntimeTests.test_description_reference_does_not_advertise_flag) ... ok
+test_dry_run_does_not_execute_backend (test_runtime.RuntimeTests.test_dry_run_does_not_execute_backend) ... ok
+test_explicit_projector_path_is_validated (test_runtime.RuntimeTests.test_explicit_projector_path_is_validated) ... ok
+test_failed_atomic_save_keeps_previous_config (test_runtime.RuntimeTests.test_failed_atomic_save_keeps_previous_config) ... ok
+test_failed_start_returns_failure_and_cleans_identity (test_runtime.RuntimeTests.test_failed_start_returns_failure_and_cleans_identity) ... ok
+test_gpu_missing_still_reports_ram (test_runtime.RuntimeTests.test_gpu_missing_still_reports_ram) ... ok
+test_invalid_edit_restores_previous_value (test_runtime.RuntimeTests.test_invalid_edit_restores_previous_value) ... ok
+test_invalid_gguf_fails_before_backend_launch (test_runtime.RuntimeTests.test_invalid_gguf_fails_before_backend_launch) ... ok
+test_invalid_settings (test_runtime.RuntimeTests.test_invalid_settings) ... ok
+test_legacy_spec_settings_migrate_without_overriding_canonical_values (test_runtime.RuntimeTests.test_legacy_spec_settings_migrate_without_overriding_canonical_values) ... ok
+test_lifecycle_lock (test_runtime.RuntimeTests.test_lifecycle_lock) ... ok
+test_load_success_result (test_runtime.RuntimeTests.test_load_success_result) ... ok
+test_missing_and_ambiguous_projector (test_runtime.RuntimeTests.test_missing_and_ambiguous_projector) ... ok
+test_missing_backend (test_runtime.RuntimeTests.test_missing_backend) ... ok
+test_mmproj_auto_is_used_when_advertised (test_runtime.RuntimeTests.test_mmproj_auto_is_used_when_advertised) ... ok
+test_mode_is_validated_against_spec_type_usage (test_runtime.RuntimeTests.test_mode_is_validated_against_spec_type_usage) ... ok
+test_modern_replacement_flag_is_not_removed (test_runtime.RuntimeTests.test_modern_replacement_flag_is_not_removed) ... ok
+test_mtp_variants_and_vision_arguments (test_runtime.RuntimeTests.test_mtp_variants_and_vision_arguments) ... ok
+test_occupied_non_http_port_is_preserved (test_runtime.RuntimeTests.test_occupied_non_http_port_is_preserved) ... ok
+test_ready_stop_and_runtime_endpoint_survives_edits (test_runtime.RuntimeTests.test_ready_stop_and_runtime_endpoint_survives_edits) ... ok
+test_removed_draft_flag_is_rejected (test_runtime.RuntimeTests.test_removed_draft_flag_is_rejected) ... ok
+test_runtime_state_status_and_clear_are_non_destructive (test_runtime.RuntimeTests.test_runtime_state_status_and_clear_are_non_destructive) ... ok
+test_saved_explicit_backend_is_not_replaced_by_path_fallback (test_runtime.RuntimeTests.test_saved_explicit_backend_is_not_replaced_by_path_fallback) ... ok
+test_second_start_keeps_existing_model (test_runtime.RuntimeTests.test_second_start_keeps_existing_model) ... ok
+test_session_backend_override_is_not_persisted (test_runtime.RuntimeTests.test_session_backend_override_is_not_persisted) ... ok
+test_settings_cancellation_preserves_running_model (test_runtime.RuntimeTests.test_settings_cancellation_preserves_running_model) ... ok
+test_settings_round_trip (test_runtime.RuntimeTests.test_settings_round_trip) ... ok
+test_shards_and_exclusions (test_runtime.RuntimeTests.test_shards_and_exclusions) ... ok
+test_stale_identity_cannot_stop_other_process (test_runtime.RuntimeTests.test_stale_identity_cannot_stop_other_process) ... ok
+test_start_failure_result_is_preserved (test_runtime.RuntimeTests.test_start_failure_result_is_preserved) ... ok
+test_switch_rechecks_identity (test_runtime.RuntimeTests.test_switch_rechecks_identity) ... ok
+test_switch_valid_model (test_runtime.RuntimeTests.test_switch_valid_model) ... ok
+test_timeout_cleans_only_launched_process (test_runtime.RuntimeTests.test_timeout_cleans_only_launched_process) ... ok
+test_unsupported_mtp_backend (test_runtime.RuntimeTests.test_unsupported_mtp_backend) ... ok
+test_validation_failure_remains_visible_after_pause_eof (test_runtime.RuntimeTests.test_validation_failure_remains_visible_after_pause_eof) ... ok
+
+----------------------------------------------------------------------
+Ran 81 tests in 12.184s
+
+OK
+
+--- 5. Whitespace check ---
+Whitespace: PASS
+
+=== TEST SUITE COMPLETE ===

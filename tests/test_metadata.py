@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 spec = importlib.util.spec_from_file_location(
-    'info', pathlib.Path(__file__).parents[1] / 'bin/prism-gguf-info.py')
+    'info', pathlib.Path(__file__).parents[1] / 'bin/ggufly-gguf-info.py')
 info = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(info)
 

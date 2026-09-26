@@ -53,10 +53,10 @@ class RuntimeTests(unittest.TestCase):
                     'XDG_CONFIG_HOME': str(self.root / 'config'),
                     'XDG_STATE_HOME': str(self.root / 'state'),
                     'XDG_DATA_HOME': str(self.root / 'data'),
-                    'PMM_MODEL_ROOT': str(self.root),
-                    'PMM_SERVER_BIN': str(self.backend),
+                    'GGUFLY_MODEL_ROOT': str(self.root),
+                    'GGUFLY_SERVER_BIN': str(self.backend),
                     'TEST_MODEL': str(self.model), 'TEST_PORT': str(self.port)}
-        self.state = self.root / 'state/prism-model-manager'
+        self.state = self.root / 'state/ggufly'
         self.addCleanup(self.cleanup_server)
 
     def cleanup_server(self):
@@ -71,7 +71,7 @@ class RuntimeTests(unittest.TestCase):
             pass
 
     def run_shell(self, code, *, env=None, ok=True):
-        prefix = 'set -e\nsource "$1/bin/prism-model-manager"\nCURRENT_MODEL="$TEST_MODEL"\nPORT="$TEST_PORT"\npause() { :; }\ngum() { :; }\n'
+        prefix = 'set -e\nsource "$1/bin/ggufly"\nCURRENT_MODEL="$TEST_MODEL"\nPORT="$TEST_PORT"\npause() { :; }\ngum() { :; }\n'
         result = subprocess.run(['bash', '-c', prefix + code, 'test', str(ROOT)],
                                 env={**self.env, **(env or {})}, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -112,7 +112,7 @@ class RuntimeTests(unittest.TestCase):
     def test_mtp_variants_and_vision_arguments(self):
         projector = self.root / 'projector with spaces.gguf'
         projector.write_bytes(self.model.read_bytes())
-        self.run_shell('''MTP=on VISION=on MMPROJ_PATH="$PMM_MODEL_ROOT/projector with spaces.gguf"
+        self.run_shell('''MTP=on VISION=on MMPROJ_PATH="$GGUFLY_MODEL_ROOT/projector with spaces.gguf"
 preflight
 [[ " ${SERVER_ARGS[*]} " == *" --spec-type draft-mtp --spec-draft-n-max 3 "* ]]
 [[ " ${SERVER_ARGS[*]} " == *" --mmproj $MMPROJ_PATH "* ]]
@@ -139,11 +139,11 @@ preflight
         for name in ('one-mmproj.gguf', 'two-mmproj.gguf'):
             (self.root / name).write_bytes(self.model.read_bytes())
         self.run_shell('VISION=on\nbuild_command', ok=False)
-        self.run_shell('VISION=on MMPROJ_PATH="$PMM_MODEL_ROOT/one-mmproj.gguf"\nbuild_command')
+        self.run_shell('VISION=on MMPROJ_PATH="$GGUFLY_MODEL_ROOT/one-mmproj.gguf"\nbuild_command')
 
     def test_explicit_projector_path_is_validated(self):
         output = self.run_shell('''VISION=on
-MMPROJ_PATH="$PMM_MODEL_ROOT/missing-projector.gguf"
+MMPROJ_PATH="$GGUFLY_MODEL_ROOT/missing-projector.gguf"
 preflight''', ok=False)
         self.assertIn('Projector not readable:', output)
 
@@ -161,7 +161,7 @@ preflight''', ok=False)
 
     def test_switch_valid_model(self):
         (self.root / 'second.gguf').write_bytes(self.model.read_bytes())
-        self.run_shell('start_server\npid=$(server_pid)\nCURRENT_MODEL="$PMM_MODEL_ROOT/second.gguf"\nwith_lifecycle_lock switch_server_locked "$pid"\n[[ $(server_pid) != "$pid" ]]\nsource "$STATE_DIR/runtime.env"\n[[ $RUN_MODEL == "$CURRENT_MODEL" ]]\nstop_server')
+        self.run_shell('start_server\npid=$(server_pid)\nCURRENT_MODEL="$GGUFLY_MODEL_ROOT/second.gguf"\nwith_lifecycle_lock switch_server_locked "$pid"\n[[ $(server_pid) != "$pid" ]]\nsource "$STATE_DIR/runtime.env"\n[[ $RUN_MODEL == "$CURRENT_MODEL" ]]\nstop_server')
 
     def test_stale_identity_cannot_stop_other_process(self):
         self.run_shell('echo $$ > "$PIDFILE"\necho invalid > "$PIDFILE.start"\ncat /proc/sys/kernel/random/boot_id > "$PIDFILE.boot"\nstop_server\nkill -0 $$')
@@ -193,7 +193,7 @@ touch "$HOME/unexpected-launch"
 exit 1
 ''')
         self.backend.chmod(0o755)
-        self.run_shell('"$1/bin/prism-model-manager" --dry-run "$TEST_MODEL"\n[[ ! -e "$HOME/unexpected-launch" ]]')
+        self.run_shell('"$1/bin/ggufly" --dry-run "$TEST_MODEL"\n[[ ! -e "$HOME/unexpected-launch" ]]')
 
     def test_missing_backend(self):
         self.run_shell('SERVER_BIN=/missing/llama-server\npreflight', ok=False)
@@ -287,7 +287,7 @@ stop_server
     def test_cancelled_backend_edit_preserves_saved_path(self):
         for value in ('', '/missing/runtime'):
             with self.subTest(value=value):
-                self.run_shell('''unset PMM_SERVER_BIN
+                self.run_shell('''unset GGUFLY_SERVER_BIN
 title() { :; }
 gum() {
     case "$1" in
@@ -305,8 +305,8 @@ source "$CONFIG"
 
     def test_backend_override_precedence_and_edit_lock(self):
         self.run_shell('''printf 'SERVER_BIN=/missing/saved-backend\\n' > "$CONFIG"
-source "$1/bin/prism-model-manager"
-[[ $SERVER_BIN == "$PMM_SERVER_BIN" ]]
+source "$1/bin/ggufly"
+[[ $SERVER_BIN == "$GGUFLY_SERVER_BIN" ]]
 title() { :; }
 gum() {
     case "$1" in
@@ -316,19 +316,19 @@ gum() {
 }
 settings_menu edit
 [[ ! -e "$HOME/unexpected-edit" ]]
-[[ $SERVER_BIN == "$PMM_SERVER_BIN" ]]
+[[ $SERVER_BIN == "$GGUFLY_SERVER_BIN" ]]
 ''')
 
     def test_saved_explicit_backend_is_not_replaced_by_path_fallback(self):
-        self.run_shell('''unset PMM_SERVER_BIN
+        self.run_shell('''unset GGUFLY_SERVER_BIN
 printf 'SERVER_BIN=/missing/custom-backend\\n' > "$CONFIG"
-source "$1/bin/prism-model-manager"
+source "$1/bin/ggufly"
 [[ $SERVER_BIN == /missing/custom-backend ]]
 if build_command; then exit 1; fi
 ''')
 
     def test_legacy_spec_settings_migrate_without_overriding_canonical_values(self):
-        config_dir = self.root / 'config/prism-model-manager'
+        config_dir = self.root / 'config/ggufly'
         config_dir.mkdir(parents=True)
         (config_dir / 'config.env').write_text(
             'SPEC_MODE=mtp\nSPEC_DRAFT_MODEL=/legacy/draft.gguf\nSPEC_DRAFT_TOKENS=7\n')
@@ -340,7 +340,7 @@ if build_command; then exit 1; fi
         self.run_shell('''[[ $MTP == off && $MTP_MODE == draft-mtp && $MTP_DRAFT_MAX == 2 ]]''')
 
     def test_session_backend_override_is_not_persisted(self):
-        config_dir = self.root / 'config/prism-model-manager'
+        config_dir = self.root / 'config/ggufly'
         config_dir.mkdir(parents=True)
         (config_dir / 'config.env').write_text(
             'SERVER_BIN=/saved/backend\nMODEL_ROOT=/saved/models\n')
@@ -349,8 +349,8 @@ source "$CONFIG"
 # save_config does NOT persist SERVER_BIN (runtime-driven in v4)
 [[ $MODEL_ROOT == /saved/models ]]
 ! grep -q '/session/backend' "$CONFIG"
-! grep -q 'PMM_SERVER_BIN' "$CONFIG"
-''', env={'PMM_SERVER_BIN': '/session/backend', 'PMM_MODEL_ROOT': '/session/models'})
+! grep -q 'GGUFLY_SERVER_BIN' "$CONFIG"
+''', env={'GGUFLY_SERVER_BIN': '/session/backend', 'GGUFLY_MODEL_ROOT': '/session/models'})
 
     def test_runtime_state_status_and_clear_are_non_destructive(self):
         output = self.run_shell('''server_health() { return 1; }
@@ -372,7 +372,7 @@ kill -0 $$
         self.run_shell('''echo $$ > "$PIDFILE"
 process_start $$ > "$PIDFILE.start"
 cat /proc/sys/kernel/random/boot_id > "$PIDFILE.boot"
-printf 'RUN_MODEL=%q\\n' "$PMM_MODEL_ROOT/loaded model.gguf" > "$STATE_DIR/runtime.env"
+printf 'RUN_MODEL=%q\\n' "$GGUFLY_MODEL_ROOT/loaded model.gguf" > "$STATE_DIR/runtime.env"
 curl() { printf '%s' '{"data":[{"id":"other"},{"id":"loaded model.gguf"}]}'; }
 [[ $(api_models_info) == 'loaded model.gguf' ]]
 curl() { return 6; }
@@ -398,11 +398,11 @@ class FilePathRegressionTests(unittest.TestCase):
                     'XDG_CONFIG_HOME': str(self.root / 'config'),
                     'XDG_STATE_HOME': str(self.root / 'state'),
                     'XDG_DATA_HOME': str(self.root / 'data'),
-                    'PMM_MODEL_ROOT': str(self.model_dir),
-                    'PMM_SERVER_BIN': str(self.backend)}
+                    'GGUFLY_MODEL_ROOT': str(self.model_dir),
+                    'GGUFLY_SERVER_BIN': str(self.backend)}
 
     def run_shell(self, code, *, env=None, ok=True):
-        prefix = ('set -e\nsource "$1/bin/prism-model-manager"\n'
+        prefix = ('set -e\nsource "$1/bin/ggufly"\n'
                   'CURRENT_MODEL="${CURRENT_MODEL:-}"\n'
                   'PORT="${TEST_PORT:-8080}"\n'
                   'pause() { :; }\ngum() { :; }\n')
@@ -427,7 +427,7 @@ true
         self.run_shell(code)
 
     def test_external_model_root_scan(self):
-        """scan_models must find GGUF models under an external PMM_MODEL_ROOT."""
+        """scan_models must find GGUF models under an external GGUFLY_MODEL_ROOT."""
         # Create a GGUF file for scan_models to find
         model_gguf = self.model_dir / 'test-model.gguf'
         model_gguf.write_bytes(b'GGUF' + struct.pack('<IQQ', 3, 0, 0))
@@ -465,12 +465,12 @@ class ProfileClobberRegressionTests(unittest.TestCase):
                     'XDG_CONFIG_HOME': str(self.root / 'config'),
                     'XDG_STATE_HOME': str(self.root / 'state'),
                     'XDG_DATA_HOME': str(self.root / 'data'),
-                    'PMM_SERVER_BIN': str(self.root / 'fake-server')}
-        state_dir = self.root / 'state/prism-model-manager'
+                    'GGUFLY_SERVER_BIN': str(self.root / 'fake-server')}
+        state_dir = self.root / 'state/ggufly'
         state_dir.mkdir(parents=True)
 
     def run_shell(self, code, *, env=None, ok=True):
-        prefix = ('set -e\nsource "$1/bin/prism-model-manager"\n'
+        prefix = ('set -e\nsource "$1/bin/ggufly"\n'
                   'CURRENT_MODEL="${CURRENT_MODEL:-}"\n'
                   'PORT="${TEST_PORT:-8080}"\n'
                   'pause() { :; }\ngum() { :; }\n')
@@ -488,7 +488,7 @@ class ProfileClobberRegressionTests(unittest.TestCase):
     def _prep_profile(self, model_path):
         """Create a model profile with known values for a given path."""
         code = f'''
-source "$1/bin/prism-model-manager"
+source "$1/bin/ggufly"
 CURRENT_MODEL="{model_path}"
 # Set custom llama.cpp values
 CTX=4096
@@ -505,7 +505,7 @@ save_model_profile
         model_a = str(self.model)
         self._prep_profile(model_a)
         code = f'''
-source "$1/bin/prism-model-manager"
+source "$1/bin/ggufly"
 CURRENT_MODEL="{model_a}"
 # Reset to global defaults
 CTX=2048
@@ -541,7 +541,7 @@ echo "FLASH=$FLASH"
         model_b = str(self.model_b)
         self._prep_profile(model_a)
         code = f'''
-source "$1/bin/prism-model-manager"
+source "$1/bin/ggufly"
 # Start with model A loaded, modify settings
 CURRENT_MODEL="{model_a}"
 CTX=8192
@@ -590,7 +590,7 @@ echo "A: FLASH=$FLASH"
         model_a = str(self.model)
         self._prep_profile(model_a)
         code = f'''
-source "$1/bin/prism-model-manager"
+source "$1/bin/ggufly"
 CURRENT_MODEL="{model_a}"
 
 # Load profile
@@ -623,7 +623,7 @@ true
         model_a = str(self.model)
         self._prep_profile(model_a)
         code = f'''
-source "$1/bin/prism-model-manager"
+source "$1/bin/ggufly"
 # Start with CURRENT_MODEL empty (first launch)
 CURRENT_MODEL=""
 
@@ -658,10 +658,10 @@ class BackendAwareMenuTests(unittest.TestCase):
                     'XDG_CONFIG_HOME': str(self.root / 'config'),
                     'XDG_STATE_HOME': str(self.root / 'state'),
                     'XDG_DATA_HOME': str(self.root / 'data'),
-                    'PMM_SERVER_BIN': str(self.root / 'fake-server')}
+                    'GGUFLY_SERVER_BIN': str(self.root / 'fake-server')}
 
     def run_shell(self, code, *, env=None, ok=True):
-        prefix = ('set -e\nsource "$1/bin/prism-model-manager"\n'
+        prefix = ('set -e\nsource "$1/bin/ggufly"\n'
                   'CURRENT_MODEL="${CURRENT_MODEL:-}"\n'
                   'PORT="${TEST_PORT:-8080}"\n'
                   'pause() { :; }\ngum() { :; }\n')
@@ -708,10 +708,10 @@ class GumInputSafetyTests(unittest.TestCase):
                     'XDG_CONFIG_HOME': str(self.root / 'config'),
                     'XDG_STATE_HOME': str(self.root / 'state'),
                     'XDG_DATA_HOME': str(self.root / 'data'),
-                    'PMM_SERVER_BIN': str(self.root / 'fake-server')}
+                    'GGUFLY_SERVER_BIN': str(self.root / 'fake-server')}
 
     def run_shell(self, code, *, env=None, ok=True):
-        prefix = ('set -e\nsource "$1/bin/prism-model-manager"\n'
+        prefix = ('set -e\nsource "$1/bin/ggufly"\n'
                   'CURRENT_MODEL="${CURRENT_MODEL:-}"\n'
                   'PORT="${TEST_PORT:-8080}"\n'
                   'pause() { :; }\ngum() { :; }\n')
@@ -728,7 +728,7 @@ class GumInputSafetyTests(unittest.TestCase):
 
     def test_input_calls_do_not_redirect_interactive_ui(self):
         import re
-        content = (Path(__file__).resolve().parents[1] / 'bin/prism-model-manager').read_text()
+        content = (Path(__file__).resolve().parents[1] / 'bin/ggufly').read_text()
         calls = re.findall(r'gum input\b[^)]*', content)
         self.assertTrue(calls)
         for call in calls:

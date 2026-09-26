@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""PMM model format detection helper — v4 GGUF-focused edition.
+"""GGUFly model format detection helper — GGUF-focused edition.
 
 Detects model format, architecture, codec, and compatibility.
-Output is JSON for consumption by the PMM shell script.
+Output is JSON for consumption by the GGUFly shell script.
 
 Accepts a path argument (file). Returns:
   format: 'gguf' | 'gguf_shard' | 'mirai_s_gguf' | 'unknown'
@@ -34,23 +34,36 @@ GGML_TYPES = {
     24: 'IQ1_S', 25: 'IQ4_NL', 26: 'IQ3_S', 27: 'IQ3_M', 28: 'IQ2_S',
     29: 'IQ2_M', 30: 'IQ4_XS', 31: 'IQ1_M', 32: 'BF16',
     # Extended/custom types
-    36: 'TQ1_0', 37: 'TQ2_0', 38: 'MXFP4_MOE', 39: 'NVFP4',
+    # Note: GGML type IDs (tensor level) differ from llama_ftype (file level).
+    # These are GGML type IDs (from ggml.h):
+    #   TQ1_0 = 34, TQ2_0 = 35 (ternary in Mirai fork)
+    #   MS_V4T8 = 90, MS_V2T4 = 91, MS_V2T6 = 92, MS_I3 = 93 (Mirai S)
+    34: 'TQ1_0', 35: 'TQ2_0',
+    38: 'MXFP4_MOE', 39: 'NVFP4',
     40: 'Q1_0', 41: 'Q2_0',
 }
 
-# Mirai-specific GGML types (custom type enum)
+# Mirai-specific GGML types (custom type enum from alesha-pro/llama.cpp-mirai-s)
+# Source: ggml/include/ggml.h lines 434-438, commit b59ae80
+#   GGML_TYPE_MS_V4T8 = 90
+#   GGML_TYPE_MS_V2T4 = 91
+#   GGML_TYPE_MS_V2T6 = 92
+#   GGML_TYPE_MS_I3   = 93
 MIRAI_GGML_TYPES = {
-    100: 'MS_V4T8',
-    101: 'MS_V2T4',
-    102: 'MS_V2T6',
-    103: 'MS_I3',
+    90: 'MS_V4T8',
+    91: 'MS_V2T4',
+    92: 'MS_V2T6',
+    93: 'MS_I3',
 }
 
 
 def get_gguf_info(path):
-    """Read GGUF metadata (delegates to prism-gguf-info.py)."""
+    """Read GGUF metadata (delegates to ggufly-gguf-info.py)."""
     script_dir = Path(__file__).resolve().parent
-    gguf_info = script_dir / 'prism-gguf-info.py'
+    gguf_info = script_dir / 'ggufly-gguf-info.py'
+
+    if not gguf_info.exists():
+        gguf_info = Path(os.environ.get('GGUFLY_BIN_DIR', '')) / 'ggufly-gguf-info.py'
 
     if not gguf_info.exists():
         gguf_info = Path(os.environ.get('PMM_BIN_DIR', '')) / 'prism-gguf-info.py'
@@ -133,20 +146,20 @@ def inspect_gguf_tensors(path):
                 unique_types.add(ggml_type)
                 tensors.append({'name': name, 'type': ggml_type})
 
-                # Detect Mirai-specific tensors
-                if ggml_type >= 100:
+                # Detect Mirai-specific tensors (GGML type IDs 90-93 in Mirai fork)
+                if ggml_type >= 90:
                     mirai_tensors.append(name)
                 if name.startswith('mirai.'):
                     mirai_tensors.append(name)
                 if 'rot' in name or 'head_aux' in name or 'codebook' in name:
-                    if ggml_type >= 100 or ggml_type > 41:
+                    if ggml_type >= 90 or ggml_type > 41:
                         mirai_tensors.append(name)
 
             return {
                 'tensor_count': min(tensor_count, 500),
                 'unique_types': [GGML_TYPES.get(t, MIRAI_GGML_TYPES.get(t, f'custom_{t}')) for t in sorted(unique_types)],
                 'mirai_tensors': list(set(mirai_tensors)),
-                'has_mirai_type': any(100 <= t <= 103 for t in unique_types),
+                'has_mirai_type': any(90 <= t <= 93 for t in unique_types),
             }
     except Exception:
         return None
@@ -297,7 +310,7 @@ def detect_file(path_str):
 
 def main():
     if len(sys.argv) < 2:
-        print(json.dumps({'error': 'Usage: prism-model-detect.py <path>'}), file=sys.stderr)
+        print(json.dumps({'error': 'Usage: ggufly-model-detect.py <path>'}), file=sys.stderr)
         sys.exit(1)
 
     path = sys.argv[1]

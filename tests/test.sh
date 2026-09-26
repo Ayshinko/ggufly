@@ -7,22 +7,22 @@ TMP=$(mktemp -d)
 trap 'rm -rf -- "$TMP"' EXIT
 export HOME="$TMP/home" XDG_CONFIG_HOME="$TMP/config" XDG_STATE_HOME="$TMP/state" XDG_DATA_HOME="$TMP/data"
 mkdir -p "$HOME" "$TMP/models with spaces" "$TMP/mock"
-export PMM_MODEL_ROOT="$TMP/models with spaces" PMM_SERVER_BIN="$TMP/mock/llama-server"
-export PMM_TEST_HELP="$ROOT/tests/fixtures/backend-help-modern.txt"
-export PMM_TEST_PORT=9999
-cat > "$PMM_SERVER_BIN" <<'MOCK'
+export GGUFLY_MODEL_ROOT="$TMP/models with spaces" GGUFLY_SERVER_BIN="$TMP/mock/llama-server"
+export GGUFLY_TEST_HELP="$ROOT/tests/fixtures/backend-help-modern.txt"
+export GGUFLY_TEST_PORT=9999
+cat > "$GGUFLY_SERVER_BIN" <<'MOCK'
 #!/usr/bin/env bash
 if [[ "${1:-}" == --help ]]; then
-    cat "$PMM_TEST_HELP"
+    cat "$GGUFLY_TEST_HELP"
     exit 0
 fi
 echo 'Unexpected server execution' >&2
 exit 99
 MOCK
-chmod +x "$PMM_SERVER_BIN"
-touch "$PMM_MODEL_ROOT/Bonsai-PTQ1_0.gguf" "$PMM_MODEL_ROOT/model two.gguf" "$PMM_MODEL_ROOT/mmproj.gguf" "$PMM_MODEL_ROOT/adapter-lora.gguf" "$PMM_MODEL_ROOT/incomplete.gguf.part"
-# shellcheck source=../bin/prism-model-manager
-source "$ROOT/bin/prism-model-manager"
+chmod +x "$GGUFLY_SERVER_BIN"
+touch "$GGUFLY_MODEL_ROOT/Bonsai-PTQ1_0.gguf" "$GGUFLY_MODEL_ROOT/model two.gguf" "$GGUFLY_MODEL_ROOT/mmproj.gguf" "$GGUFLY_MODEL_ROOT/adapter-lora.gguf" "$GGUFLY_MODEL_ROOT/incomplete.gguf.part"
+# shellcheck source=../bin/ggufly
+source "$ROOT/bin/ggufly"
 check() { echo "PASS: $*"; }
 [[ $(scan_models | wc -l) == 2 ]]
 check 'scan excludes adapters, projectors and partial downloads; supports spaces'
@@ -31,7 +31,7 @@ for format in PTQ1_0 PQ2_0 Q2_0 Q1_0; do
 done
 [[ $(model_info unknown.gguf) == *Unknown* ]]
 check 'four quantization hints plus unknown fallback'
-CURRENT_MODEL="$PMM_MODEL_ROOT/model two.gguf"
+CURRENT_MODEL="$GGUFLY_MODEL_ROOT/model two.gguf"
 LORA_PATH='$HOME/literal $(touch SHOULD_NOT_EXIST) adapter.gguf'
 CTX=2048
 save_config
@@ -65,7 +65,7 @@ import struct, sys
 with open(sys.argv[1], 'wb') as f:
     f.write(b'GGUF' + struct.pack('<IQQ', 3, 0, 0))
 PYMODEL
-"$ROOT/bin/prism-model-manager" --dry-run "$CURRENT_MODEL" > "$TMP/dry-run"
+"$ROOT/bin/ggufly" --dry-run "$CURRENT_MODEL" > "$TMP/dry-run"
 [[ -s "$TMP/dry-run" ]]
 check 'dry-run never executes runtime'
 cat > "$TMP/mock/nvidia-smi" <<'MOCK'
@@ -91,10 +91,10 @@ echo invalid > "$PIDFILE.start"
 if server_pid; then exit 1; fi
 check 'stale PID identity rejected'
 # Start only a tiny fake process. Never execute the configured real runtime.
-cat > "$PMM_SERVER_BIN" <<'MOCK'
+cat > "$GGUFLY_SERVER_BIN" <<'MOCK'
 #!/usr/bin/env bash
 if [[ "${1:-}" == --help ]]; then
-    cat "$PMM_TEST_HELP"
+    cat "$GGUFLY_TEST_HELP"
     exit 0
 fi
 exec sleep 30
@@ -109,7 +109,7 @@ import struct, sys
 with open(sys.argv[1], 'wb') as f:
     f.write(b'GGUF' + struct.pack('<IQQ', 3, 0, 0))
 PYMODEL
-LORA_ENABLED=off VISION=off PORT="$PMM_TEST_PORT" HOST=127.0.0.1
+LORA_ENABLED=off VISION=off PORT="$GGUFLY_TEST_PORT" HOST=127.0.0.1
 save_model_profile
 start_server
 managed_pid=$(server_pid)
@@ -122,9 +122,9 @@ PREFIX="$TMP/install prefix" "$ROOT/install.sh"
 # Second install: with gum override, the upgrade prompt is auto-accepted (gum returns 0)
 # and the installer re-installs over itself. No errors should occur.
 PREFIX="$TMP/install prefix" "$ROOT/install.sh" 2>/dev/null || true
-[[ $("$TMP/install prefix/bin/prism-model-manager" --version) == "$VERSION" ]]
+[[ $("$TMP/install prefix/bin/ggufly" --version) == "$VERSION" ]]
 PREFIX="$TMP/install prefix" "$ROOT/uninstall.sh"
-[[ ! -e "$TMP/install prefix/bin/prism-model-manager" && -f "$CONFIG" && -f "$LOGFILE" ]]
+[[ ! -e "$TMP/install prefix/bin/ggufly" && -f "$CONFIG" && -f "$LOGFILE" ]]
 PREFIX="$TMP/install prefix" "$ROOT/uninstall.sh"
 check 'installation, overwrite refusal, installed execution, uninstall, retained data and idempotence'
 
@@ -181,16 +181,16 @@ case " $* " in
 esac
 MOCK
 chmod +x "$TMP/mock/curl"
-if "$ROOT/bin/prism-model-manager" --api-ready >/dev/null 2>&1; then exit 1; fi
+if "$ROOT/bin/ggufly" --api-ready >/dev/null 2>&1; then exit 1; fi
 check '--api-ready exits nonzero when the API is unreachable'
 
 # ── Regression: set -u startup (no unbound variables) ──
 (
     TMPU=$(mktemp -d)
     export HOME="$TMPU" XDG_CONFIG_HOME="$TMPU/c" XDG_STATE_HOME="$TMPU/s" XDG_DATA_HOME="$TMPU/d"
-    mkdir -p "$TMPU/c/prism-model-manager" "$TMPU/s/prism-model-manager" "$TMPU/d"
-    # Source PMM under strict checks with no model selected, no config
-    source "$ROOT/bin/prism-model-manager" 2>"$TMPU/startup.err"
+    mkdir -p "$TMPU/c/ggufly" "$TMPU/s/ggufly" "$TMPU/d"
+    # Source ggufly under strict checks with no model selected, no config
+    source "$ROOT/bin/ggufly" 2>"$TMPU/startup.err"
     EC=$?
     ERR=$(cat "$TMPU/startup.err")
     if [ "$EC" -ne 0 ] || [ -n "$ERR" ]; then
@@ -239,10 +239,10 @@ check 'disk check uses target filesystem (shutil.disk_usage)'
 
 # Test 6: No hard-coded dev paths in source
 (
-    ! grep -q '/home/ayshinko' "$ROOT/bin/prism-model-manager"
-    ! grep -q 'AI-Workspace/pmm-source' "$ROOT/bin/prism-model-manager"
-    ! grep -q '/home/ayshinko' "$ROOT/bin/prism-backend-manager"
-    ! grep -q 'AI-Workspace' "$ROOT/bin/prism-backend-manager"
+    ! grep -q '/home/ayshinko' "$ROOT/bin/ggufly"
+    ! grep -q 'AI-Workspace/pmm-source' "$ROOT/bin/ggufly"
+    ! grep -q '/home/ayshinko' "$ROOT/bin/ggufly-runtime-manager"
+    ! grep -q 'AI-Workspace' "$ROOT/bin/ggufly-runtime-manager"
 )
 check 'no hard-coded dev paths in source files'
 

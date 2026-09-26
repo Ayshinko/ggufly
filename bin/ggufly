@@ -2,7 +2,7 @@
 
 set -uo pipefail
 umask 077
-VERSION=4.0.0
+VERSION=1.0.0-dev
 
 # ── Color support ─────────────────────────────────
 if [ -n "${NO_COLOR:-}" ] || ! [ -t 1 ]; then
@@ -65,8 +65,8 @@ sep() {
 }
 
 # ── Paths ────────────────────────────────────────
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/prism-model-manager"
-STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/prism-model-manager"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ggufly"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ggufly"
 MODEL_PROFILE_DIR="$CONFIG_DIR/model-profiles"
 CONFIG="$CONFIG_DIR/config.env"
 PIDFILE="$STATE_DIR/server.pid"
@@ -75,13 +75,34 @@ LOGFILE="$STATE_DIR/server.log"
 mkdir -p "$CONFIG_DIR" "$STATE_DIR" "$MODEL_PROFILE_DIR"
 
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-BACKENDS_DIR="$DATA_HOME/prism-model-manager/backends"
+BACKENDS_DIR="$DATA_HOME/ggufly/backends"
+
+# ── PMM legacy migration: import existing data on first run ──
+PMM_LEGACY_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/prism-model-manager"
+if [ ! -f "$CONFIG" ] && [ -d "$PMM_LEGACY_CONFIG" ]; then
+    mkdir -p "$CONFIG_DIR"
+    # Copy GGUF-era settings (runtimes, model profiles, config)
+    if [ -d "$PMM_LEGACY_CONFIG/runtimes" ]; then
+        cp -a "$PMM_LEGACY_CONFIG/runtimes"/*.conf "$CONFIG_DIR/runtimes/" 2>/dev/null || true
+    fi
+    if [ -d "$PMM_LEGACY_CONFIG/model-profiles" ]; then
+        cp -a "$PMM_LEGACY_CONFIG/model-profiles"/*.env "$MODEL_PROFILE_DIR/" 2>/dev/null || true
+    fi
+    if [ -f "$PMM_LEGACY_CONFIG/config.env" ]; then
+        cp -a "$PMM_LEGACY_CONFIG/config.env" "$CONFIG" 2>/dev/null || true
+    fi
+    # Update runtime paths from legacy to new XDG paths in copied configs
+    for f in "$CONFIG_DIR/runtimes/"*.conf; do
+        [ -f "$f" ] || continue
+        sed -i 's|/prism-model-manager/|/ggufly/|g' "$f" 2>/dev/null || true
+    done
+fi
 
 # ── Script references ──────────────────────────
 SCRIPT_DIR=$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
-RUNTIME_REGISTRY="$SCRIPT_DIR/prism-runtime-registry.sh"
-BACKEND_MANAGER="$SCRIPT_DIR/prism-backend-manager"
-MODEL_DETECT_PY="$SCRIPT_DIR/prism-model-detect.py"
+RUNTIME_REGISTRY="$SCRIPT_DIR/ggufly-runtime-registry.sh"
+BACKEND_MANAGER="$SCRIPT_DIR/ggufly-runtime-manager"
+MODEL_DETECT_PY="$SCRIPT_DIR/ggufly-model-detect.py"
 
 # ── Default settings ──────────────────────────
 MODEL_ROOT="/mnt/Storage/Model"
@@ -187,9 +208,9 @@ if [ -f "$CONFIG" ]; then
 fi
 
 SAVED_MODEL_ROOT="$MODEL_ROOT"
-MODEL_ROOT="${PMM_MODEL_ROOT:-$MODEL_ROOT}"
-SERVER_BIN="${PMM_SERVER_BIN:-$SERVER_BIN}"
-BENCH_BIN="${PMM_BENCH_BIN:-$BENCH_BIN}"
+MODEL_ROOT="${GGUFLY_MODEL_ROOT:-${PMM_MODEL_ROOT:-$MODEL_ROOT}}"
+SERVER_BIN="${GGUFLY_SERVER_BIN:-${PMM_SERVER_BIN:-$SERVER_BIN}}"
+BENCH_BIN="${GGUFLY_BENCH_BIN:-${PMM_BENCH_BIN:-$BENCH_BIN}}"
 
 # Legacy SPEC migration (preserved from v3.x)
 if [ -n "${SPEC_MODE:-}" ] && [ "${CONFIG_HAS_MTP_MODE:-0}" -eq 0 ]; then MTP_MODE="$SPEC_MODE"; fi
@@ -374,8 +395,8 @@ runtime_status_for_display() {
 resolve_runtime_binary() {
     local id="$1"
 
-    if [ -n "${PMM_SERVER_BIN:-}" ]; then
-        echo "$PMM_SERVER_BIN"
+    if [ -n "${GGUFLY_SERVER_BIN:-}" ]; then
+        echo "$GGUFLY_SERVER_BIN"
         return 0
     fi
 
@@ -526,8 +547,8 @@ preflight() {
     [ -e "$CURRENT_MODEL" ] || { echo "Model file missing: $CURRENT_MODEL" >&2; return 1; }
     validate_settings || return 1
 
-    [ -x "$SERVER_BIN" ] || { echo "Set PMM_SERVER_BIN or select a runtime with a valid llama-server." >&2; return 1; }
-    python3 "$SCRIPT_DIR/prism-gguf-info.py" "$CURRENT_MODEL" >/dev/null || return 1
+    [ -x "$SERVER_BIN" ] || { echo "Set GGUFLY_SERVER_BIN or select a runtime with a valid llama-server." >&2; return 1; }
+    python3 "$SCRIPT_DIR/ggufly-gguf-info.py" "$CURRENT_MODEL" >/dev/null || return 1
     python3 - "$CURRENT_MODEL" <<'CHECK' || return 1
 import pathlib, re, sys
 p = pathlib.Path(sys.argv[1])
@@ -543,7 +564,7 @@ CHECK
 
     local BACKEND_HELP BACKEND_OPTIONS
     BACKEND_HELP=$(timeout 10 "$SERVER_BIN" --help 2>&1) || { echo "Backend --help failed or timed out: $SERVER_BIN" >&2; printf '%s\n' "$BACKEND_HELP" | tail -8 >&2; return 1; }
-    BACKEND_OPTIONS=$(python3 "$SCRIPT_DIR/prism-backend-info.py" <<< "$BACKEND_HELP") || {
+    BACKEND_OPTIONS=$(python3 "$SCRIPT_DIR/ggufly-backend-info.py" <<< "$BACKEND_HELP") || {
         echo "Unable to parse backend help." >&2; return 1;
     }
     for flag in -m --host --port -ngl -fa -c -b -ub -np -n --temp --top-p --top-k --min-p --cache-type-k --cache-type-v --jinja; do
@@ -592,7 +613,7 @@ CHECK
 
 # ── Server command building ──────────────────
 build_command() {
-    [ -x "$SERVER_BIN" ] || { echo "Set PMM_SERVER_BIN or select a runtime with llama-server." >&2; return 1; }
+    [ -x "$SERVER_BIN" ] || { echo "Set GGUFLY_SERVER_BIN or select a runtime with llama-server." >&2; return 1; }
     [ -f "$CURRENT_MODEL" ] || { echo "Model file missing." >&2; return 1; }
     validate_settings || return 1
     SERVER_ARGS=(
@@ -643,7 +664,7 @@ save_config() {
     local temporary
     temporary=$(mktemp "$CONFIG.XXXXXX") || return 1
     {
-        if [ -z "${PMM_MODEL_ROOT:-}" ]; then
+        if [ -z "${GGUFLY_MODEL_ROOT:-}" ]; then
             printf 'MODEL_ROOT=%q\n' "$SAVED_MODEL_ROOT"
         elif [ -n "$SAVED_MODEL_ROOT" ]; then
             printf 'MODEL_ROOT=%q\n' "$SAVED_MODEL_ROOT"
@@ -740,7 +761,7 @@ load_model_profile() {
     fi
 
     # After loading profile, resolve runtime binary
-    if [ -z "${PMM_SERVER_BIN:-}" ]; then
+    if [ -z "${GGUFLY_SERVER_BIN:-}" ]; then
         if [ -n "$RUNTIME_ID" ]; then
             local resolved_bin
             resolved_bin=$(resolve_runtime_binary "$RUNTIME_ID" 2>/dev/null || echo "")
@@ -772,7 +793,8 @@ title() {
     local cols="${TERM_COLS:-80}"
     [ "$cols" -gt 120 ] && cols=120
     printf '%b' "$C_CYAN$C_BOLD"
-    printf '%s\n' "  Prism Model Manager v4"
+    printf '%s\n' "  GGUFly"
+    printf '%s\n' "  GGUF models • llama.cpp runtimes • local inference"
     printf '%b' "$C_RESET"
     printf '%b' "$C_DIM$C_GRAY"
     printf '%s\n' "  GGUF Runtime & Backend Control"
@@ -921,9 +943,9 @@ start_server() { with_lifecycle_lock start_server_locked; }
 start_server_locked() {
     server_pid >/dev/null && { echo "Managed process already exists; use Load / Switch Model." >&2; return 1; }
 
-    # Check runtime selection (skip if PMM_SERVER_BIN provides session override)
+    # Check runtime selection (skip if GGUFLY_SERVER_BIN provides session override)
     if [ -z "$RUNTIME_ID" ] || [ "$RUNTIME_ID" = "Not selected" ]; then
-        if [ -z "${PMM_SERVER_BIN:-}" ] || [ ! -x "$PMM_SERVER_BIN" ]; then
+        if [ -z "${GGUFLY_SERVER_BIN:-}" ] || [ ! -x "$GGUFLY_SERVER_BIN" ]; then
             echo ""
             echo "No llama.cpp runtime selected for this model."
             echo "Select a runtime in Settings -> Runtime fork."
@@ -931,8 +953,8 @@ start_server_locked() {
             pause
             return 1
         fi
-        # PMM_SERVER_BIN provides a valid explicit binary — use that
-        SERVER_BIN="$PMM_SERVER_BIN"
+        # GGUFLY_SERVER_BIN provides a valid explicit binary — use that
+        SERVER_BIN="$GGUFLY_SERVER_BIN"
     fi
 
     preflight || return 1
@@ -1328,7 +1350,7 @@ settings_menu() {
                 done <<< "$rt_ids"
 
                 if [ "${#menu_items[@]}" -eq 0 ]; then
-                    echo "No runtimes registered. Initialize with: prism-runtime-registry.sh init"
+                    echo "No runtimes registered. Initialize with: ggufly-runtime-registry.sh init"
                     pause; continue
                 fi
 
@@ -1411,7 +1433,7 @@ settings_menu() {
 
                         if [ "$found" -eq 1 ]; then
                             # Resolve binary for this runtime
-                            if [ -z "${PMM_SERVER_BIN:-}" ]; then
+                            if [ -z "${GGUFLY_SERVER_BIN:-}" ]; then
                                 local new_bin
                                 new_bin=$(resolve_runtime_binary "$RUNTIME_ID" 2>/dev/null || echo "")
                                 if [ -x "$new_bin" ]; then
@@ -1568,8 +1590,8 @@ settings_menu() {
             "  Model root"*)
                 edit_input MODEL_ROOT --value="$MODEL_ROOT" ;;
             "  Server binary"*)
-                if [ -n "${PMM_SERVER_BIN:-}" ]; then
-                    echo "PMM_SERVER_BIN controls this session."
+                if [ -n "${GGUFLY_SERVER_BIN:-}" ]; then
+                    echo "GGUFLY_SERVER_BIN controls this session."
                 else
                     local value
                     if ! value=$(gum input --value="$SERVER_BIN" --placeholder="/path/to/llama-server"); then continue; fi
@@ -1706,7 +1728,7 @@ add_runtime_folder_flow() {
             # Fallback manual registration
             local safe_id
             safe_id=$(echo "$rt_name" | sed 's/[^a-zA-Z0-9._-]/_/g')
-            local registry_dir="${XDG_CONFIG_HOME:-$HOME/.config}/prism-model-manager/runtimes"
+            local registry_dir="${XDG_CONFIG_HOME:-$HOME/.config}/ggufly/runtimes"
             mkdir -p "$registry_dir"
             cat > "$registry_dir/$safe_id.conf" <<CONF
 id=$safe_id
@@ -1787,7 +1809,7 @@ remove_runtime_entry_flow() {
 
     if [ "$managed" = "true" ]; then
         echo "Cannot remove built-in runtime entries via this menu."
-        echo "Use 'prism-backend-manager remove $target_id' instead."
+        echo "Use 'ggufly-runtime-manager remove $target_id' instead."
         pause
         return 1
     fi
@@ -1799,9 +1821,9 @@ remove_runtime_entry_flow() {
     echo "  Folder left intact: $folder"
     echo ""
 
-    if gum confirm "Remove runtime '$target_id' from PMM? (folder NOT deleted)"; then
+    if gum confirm "Remove runtime '$target_id' from GGUFly? (folder NOT deleted)"; then
         "$RUNTIME_REGISTRY" unregister "$target_id" 2>/dev/null || {
-            rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/prism-model-manager/runtimes/$target_id.conf"
+            rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/ggufly/runtimes/$target_id.conf"
         }
         echo "Removed from registry."
         # Clear RUNTIME_ID if it was the one removed
@@ -2279,7 +2301,7 @@ main_menu() {
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     case "${1:-}" in
         --version) echo "$VERSION" ;;
-        --help) echo "Usage: prism-model-manager [--scan|--gpu|--info MODEL|--dry-run MODEL|--logs|--check|--api-ready|--state|--clear-state]" ;;
+        --help) echo "Usage: ggufly [--scan|--gpu|--info MODEL|--dry-run MODEL|--logs|--check|--api-ready|--state|--clear-state]" ;;
         --scan) scan_models ;;
         --gpu) gpu_info ;;
         --info) model_info "${2:?model path required}" ;;

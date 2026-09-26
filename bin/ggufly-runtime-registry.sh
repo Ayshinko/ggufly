@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# prism-runtime-registry.sh — PMM runtime registry library
+# ggufly-runtime-registry.sh — GGUFly runtime registry library
 #
 # Provides functions to manage the runtime registry: registration, discovery,
 # llama-server binary discovery, capability probing, and caching.
@@ -10,7 +10,7 @@
 # Each .conf file is a simple key=value Bash-safe snippet:
 #   id=standard
 #   display_name=Standard llama.cpp
-#   folder=~/.local/share/prism-model-manager/backends/llama.cpp/standard/current
+#   folder=~/.local/share/ggufly/backends/llama.cpp/standard/current
 #   managed=true
 #   binary=<optional explicit llama-server path>
 #   source_repo=https://github.com/ggml-org/llama.cpp
@@ -22,12 +22,12 @@ set -uo pipefail
 
 # ── Resolve paths ─────────────────────────────
 SCRIPT_DIR=$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/prism-model-manager"
-STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/prism-model-manager"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ggufly"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ggufly"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 
-RUNTIME_REGISTRY_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/prism-model-manager/runtimes"
-BACKENDS_DIR="$DATA_HOME/prism-model-manager/backends"
+RUNTIME_REGISTRY_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ggufly/runtimes"
+BACKENDS_DIR="$DATA_HOME/ggufly/backends"
 LLAMA_BACKENDS_DIR="$BACKENDS_DIR/llama.cpp"
 CAP_CACHE_DIR="$STATE_DIR/capability-cache"
 

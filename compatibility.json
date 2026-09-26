@@ -1,6 +1,6 @@
 {
-  "version": "4.0.0",
-  "updated": "2026-09-26",
+  "version": "1.0.0-dev",
+  "updated": "2026-09-27",
   "backends": {
     "standard_llamacpp": {
       "pinned_version": "b5098",

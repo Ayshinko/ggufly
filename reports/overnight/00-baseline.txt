@@ -1,0 +1,93 @@
+============================================================
+GGUFly — BASELINE SNAPSHOT
+============================================================
+
+Date:       Sun Sep 27 01:09:04 AM CEST 2026
+Hostname:   omarchy
+Kernel:     Linux omarchy 6.18.49-3-lts #1 SMP PREEMPT_DYNAMIC Sun, 06 Sep 2026 13:22:39 +0000 x86_64 GNU/Linux
+
+GPU:
+NVIDIA GeForce RTX 4070 SUPER, 610.57.04, 00000000:01:00.0
+
+Driver:
+610.57.04
+
+CUDA Toolkit:
+Build cuda_13.3.r13.3/compiler.38244171_0
+
+Memory:
+Mem:            30Gi       6.7Gi       890Mi       266Mi        25Gi        24Gi
+
+============================================================
+GIT STATUS
+============================================================
+
+ M TESTING.md
+RM bin/prism-model-manager -> bin/ggufly
+R  bin/prism-backend-info.py -> bin/ggufly-backend-info.py
+R  bin/prism-gguf-info.py -> bin/ggufly-gguf-info.py
+RM bin/prism-model-detect.py -> bin/ggufly-model-detect.py
+RM bin/prism-backend-manager -> bin/ggufly-runtime-manager
+RM bin/prism-runtime-registry.sh -> bin/ggufly-runtime-registry.sh
+ M examples/config.env.example
+ M install.sh
+ M packaging/build-release.sh
+ M tests/test.sh
+ M tests/test_backend_info.py
+ M tests/test_download.py
+ M tests/test_gum_tui.py
+ M tests/test_metadata.py
+ M tests/test_runtime.py
+ M uninstall.sh
+?? reports/
+---
+Branch: main-gguf-edition-4.0.0
+---
+Remote:
+origin	https://github.com/Ayshinko/prism-model-manager.git (fetch)
+origin	https://github.com/Ayshinko/prism-model-manager.git (push)
+---
+Recent commits:
+e25258d (HEAD -> main-gguf-edition-4.0.0) fix: production fixes for v4.0.0 release acceptance
+d5d87f9 (tag: v4.0.0) feat: refocus Prism Model Manager on GGUF and llama.cpp
+e343611 Merge branch 'vllm-mirai-integration'
+a352dc5 (vllm-mirai-integration) feat: preserve extended vLLM and Mirai S runtime edition
+e92efa6 fix: never use -1 as corruption recovery default for VLLM_MAX_MODEL_LEN
+3cd9532 fix: safe gum input handling and value validation
+bc8e52e fix: correct VLLM_MAX_MODEL_LEN=-1 help text
+2967051 fix: remove request-generation params from vLLM runtime settings menu
+cec803c fix: backend-aware settings menu and status screen
+4bcffa5 fix: same-model profile clobber in choose_model
+ccd10a9 fix: launch command PYTHONPATH env prefix and legacy PLUGIN_DIR migration
+fa776fe (tag: v3.5.1) chore: update build-release.sh version refs to v3.5.1
+a39a3aa fix: complete v3.5.1 vLLM and Mirai S integration
+1a3a867 (tag: v3.5.0, origin/main, origin/HEAD) v3.5.0 — Model-local plugin directories (.pmm/plugins/)
+e60ab6e feat: model-local plugin directories (.pmm/plugins/)
+f7d36e2 (tag: v3.4.0) v3.4.0 — Bug fixes, TUI polish, auto-install & Python compat
+fdf7e28 chore: bump version to 3.4.0 for release
+2c3efc4 docs: update README with correct release archive sizes
+4075ff0 v3.3.0 — Self-Contained Backend Management System
+3892d68 (tag: v3.3.0) fix: resolve startup crash, TUI separator, and vLLM auto-install bugs
+---
+
+Diff stat:
+ TESTING.md                     |  21 +++++----
+ bin/ggufly                     |  86 ++++++++++++++++++++-------------
+ bin/ggufly-model-detect.py     |  13 +++--
+ bin/ggufly-runtime-manager     |  44 ++++++++---------
+ bin/ggufly-runtime-registry.sh |  12 ++---
+ examples/config.env.example    |   4 +-
+ install.sh                     |  86 ++++++++++++++++-----------------
+ packaging/build-release.sh     |  46 +++++++++---------
+ tests/test.sh                  |  48 +++++++++----------
+ tests/test_backend_info.py     |   4 +-
+ tests/test_download.py         |  30 ++++++------
+ tests/test_gum_tui.py          |   6 +--
+ tests/test_metadata.py         |   4 +-
+ tests/test_runtime.py          |  74 ++++++++++++++---------------
+ uninstall.sh                   | 105 +++++++++++++++++++++++++++++------------
+ 15 files changed, 327 insertions(+), 256 deletions(-)
+
+---
+Diff check:
+

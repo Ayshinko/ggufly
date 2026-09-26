@@ -1,171 +1,197 @@
-# Prism Model Manager
+# GGUFly
 
-> A focused Linux TUI for managing GGUF models through llama.cpp.
+> A Linux TUI for managing GGUF models and llama.cpp runtimes.
 
-[![Latest release](https://img.shields.io/github/release/Ayshinko/prism-model-manager/latest?label=Release&logo=github&logoColor=black&color=72af9d&borderColor=black)](https://github.com/Ayshinko/prism-model-manager/releases/latest)
-[![License: MIT](https://img.shields.io/github/license/Ayshinko/prism-model-manager?logo=github&logoColor=black&color=72af9d&borderColor=black)](https://opensource.org/licenses/MIT)
-[![Platform: Linux](https://img.shields.io/badge/Linux-x86_64-007ACC?logo=linux&logoColor=white&borderColor=black)](https://github.com/Ayshinko/prism-model-manager)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Ayshinko/ggufly/blob/main/LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/Ayshinko/ggufly?include_prereleases)](https://github.com/Ayshinko/ggufly/releases)
+[![Platform: Linux](https://img.shields.io/badge/Linux-x86_64-007ACC?logo=linux&logoColor=white)](https://github.com/Ayshinko/ggufly)
 
-Prism Model Manager is a terminal UI for running and managing GGUF models on
-NVIDIA GPUs. It wraps the Prism llama.cpp fork and handles model discovery,
-per-model profiles, server lifecycle, inference settings, live logs, VRAM
-monitoring, chat tests and benchmarks — all without maintaining long server
-commands manually.
+**Run GGUF your way.**
 
-A companion branch, **`experimental/vllm`**, provides extended support for
-vLLM, HuggingFace Safetensors and the Mirai S compressed-weight plugin.
+GGUFly is a Linux terminal UI for managing GGUF quantized models through
+llama.cpp-compatible runtimes. It orchestrates the complete lifecycle — model
+discovery, runtime selection, server start/stop, API monitoring, chat testing,
+and benchmarking — all from the terminal with a keyboard-driven interface.
 
-**Independent community project. Not affiliated with, endorsed by, or
-maintained by PrismML or Mirai Labs.**
+**CLI:** `ggufly` • **Short alias:** `ggly` • **Deprecated alias:** `pmm`
 
 <p align="center">
-  <img src="assets/prism-model-manager-showcase.png" width="100%" alt="Prism Model Manager">
+  <img src="assets/ggufly-showcase.png" width="100%" alt="GGUFly">
 </p>
 
-Version **4.0.0**, licensed under the [MIT License](LICENSE).
+---
 
-Originally developed on **Omarchy / Arch Linux**. The launcher uses standard
-Linux command-line tools and does not depend on Hyprland or an Omarchy desktop
-session. Other distributions may work with the dependencies below; they have not
-been validated by the maintainer.
+## Architecture
+
+GGUFly operates on a simple but powerful loop:
+
+**Model → Runtime entry → Runtime folder → llama-server → Capabilities → Inference**
+
+### Runtime Selection
+
+You choose the runtime explicitly. GGUFly does not guess.
+
+- **Standard llama.cpp** — Upstream community baseline
+- **PrismML / Bonsai** — Ternary quantization fork with MTP support
+- **Mirai S** — Compressed-weight llama.cpp fork
+- **External** — Any arbitrary llama.cpp build; a first-class citizen
+
+There is **no "Auto" runtime mode.** Runtime behavior varies significantly
+between forks and builds. GGUFly surfaces the choice and remembers your
+preference per model.
+
+### Runtime Folder
+
+Each runtime entry points to a directory containing a `llama-server` binary.
+Multiple runtimes can coexist side by side — one per fork, or several versions
+of the same fork.
+
+### Capability Detection
+
+When you select a runtime, GGUFly parses `llama-server --help` to discover
+exactly what features that binary supports: context backends (CUDA, Vulkan,
+Metal, CPU), extended flags (vision, MTP, LoRA), and compile-time options.
+No hardcoded flag lists.
+
+### Codec Detection
+
+GGUFly reads each model's GGUF metadata to determine its tensor type (codec)
+and recommends a compatible runtime. The recommendation is a suggestion — you
+always confirm the choice.
+
+### Per-Model Persistence
+
+Every model remembers its `RUNTIME_ID`, context, GPU layers, KV cache
+settings, MTP configuration, and vision projector. Restore your exact setup
+when you switch back.
+
+---
+
+## Features
+
+- **Runtime registry** — Add, select, and manage multiple llama.cpp-compatible runtimes side by side
+- **External runtime support** — Any arbitrary llama.cpp build works as a first-class citizen
+- **Capability probing** — Auto-detects available flags from the actual `llama-server --help`
+- **No "Auto" runtime mode** — You choose; GGUFly remembers per model
+- **Model codec detection** — Reads GGUF metadata, suggests compatible runtimes
+- **Built-in fork support** — Standard llama.cpp, PrismML/Bonsai, Mirai S
+- **GGUF model scanning** — Discovers `.gguf` files, reads architecture and codec metadata
+- **Per-model profiles** — Persist context, GPU layers, KV cache, MTP, etc.
+- **Server lifecycle** — Start, stop, switch, restart, health check, live logs
+- **GPU/VRAM monitoring** — NVIDIA utilization, memory, and temperature display
+- **MTP speculative decoding** — Draft-model accelerated inference where supported
+- **Vision/multimodal** — `--mmproj` projector support with capability check
+- **LoRA adapters** — Load adapters at server start with A/B scoring
+- **Chat test** — Quick prompt verification against the running server
+- **API ready info** — Displays OpenAI-compatible endpoint URL
+- **Benchmark** — Performance measurement against the running server
+- **Process safety** — PID tracking, boot identity, port conflict detection, stale state cleanup
+- **First-run migration** — Automatic non-destructive import of old PMM configuration
+- **Settings validation** — Validates settings and binary capabilities before launch
+
+---
+
+## Quick Start
+
+```bash
+# Clone
+git clone https://github.com/Ayshinko/ggufly.git
+cd ggufly
+
+# Install
+./install.sh
+
+# Launch
+ggufly
+```
+
+Or use the short alias:
+
+```bash
+ggly
+```
+
+---
+
+## Dependencies
+
+Linux, Bash 4.4+, **gum**, **curl**, **jq**, less, Python 3.8+ (standard library
+only), GNU coreutils/findutils, procps-ng. `unzip` is required for downloading
+llama.cpp releases. `xdg-open` is optional for the browser UI.
+
+**NVIDIA GPU required for CUDA inference.** Compatible NVIDIA driver needed
+(R525+ for CUDA 12). Backend binaries are version-pinned and verified by SHA256
+checksums. CUDA driver and runtime libraries are **not** bundled.
+
+On Arch Linux / Omarchy:
+
+```bash
+sudo pacman -S --needed git bash gum curl jq less python coreutils findutils procps-ng util-linux xdg-utils
+```
+
+---
 
 ## Screenshots
 
 <p align="center">
-  <img src="assets/screenshots/main-menu.png" width="900" alt="Prism Model Manager main menu">
+  <img src="assets/screenshots/main-menu.png" width="900" alt="GGUFly main menu">
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/model-settings.png" width="900" alt="Prism Model Manager model settings">
+  <img src="assets/screenshots/model-settings.png" width="900" alt="GGUFly model settings">
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/model-picker.png" width="900" alt="Prism Model Manager model picker">
+  <img src="assets/screenshots/model-picker.png" width="900" alt="GGUFly model picker">
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/benchmark.png" width="900" alt="Prism Model Manager benchmark">
+  <img src="assets/screenshots/benchmark.png" width="900" alt="GGUFly benchmark">
 </p>
 
-## What it does
-
-- Discover and switch GGUF models
-- Auto-download the llama.cpp backend on first use
-- Save individual model profiles
-- Configure context, GPU layers, batch size, KV cache and sampling
-- Start / stop the Prism llama.cpp server
-- Follow live server logs
-- Display NVIDIA VRAM/utilization and system RAM usage
-- MTP speculative decoding support
-- Vision projector support with backend capability checks
-- LoRA configuration and A/B scoring
-- Validate settings and ports before launch; report failure
-- Run quick chat tests on the running model
-- Launch the Web UI
-- Report local API base URL, reachability and running model ID
-- Run raw speed benchmarks
-- Process safety: PID tracking, boot identity, port conflict detection
-- Colored terminal dashboard with status indicators
-- Per-model profile persistence across restarts
-
-## Quick start
-
-### Option 1 (recommended) — Standard online release (small download)
-
-Download the latest PMM release:
-
-```bash
-# Download and extract the standard bootstrap package (~60 KB)
-wget https://github.com/Ayshinko/prism-model-manager/releases/latest/download/prism-model-manager-4.0.0-linux-x86_64-standard.tar.gz
-tar xzf prism-model-manager-4.0.0-linux-x86_64-standard.tar.gz
-cd prism-model-manager-4.0.0-linux-x86_64-standard
-
-# Install PMM scripts only
-./install.sh
-export PATH="$HOME/.local/bin:$PATH"
-
-# Launch — backend downloads on first use
-pmm
-```
-
-### Option 2 — Offline release (includes bundled llama.cpp)
-
-For systems without internet access at install time:
-
-```bash
-# Download the offline package (~49 MB)
-wget https://github.com/Ayshinko/prism-model-manager/releases/latest/download/prism-model-manager-4.0.0-linux-x86_64-offline.tar.gz
-tar xzf prism-model-manager-4.0.0-linux-x86_64-offline.tar.gz
-cd prism-model-manager-4.0.0-linux-x86_64-offline
-
-# Install with bundled llama.cpp backend
-./install.sh --offline
-export PATH="$HOME/.local/bin:$PATH"
-pmm
-```
-
-### Option 3 — Git clone (development)
-
-```bash
-git clone https://github.com/Ayshinko/prism-model-manager.git
-cd prism-model-manager
-git checkout main
-./install.sh
-export PATH="$HOME/.local/bin:$PATH"
-pmm
-```
-
-## Dependencies
-
-Linux, Bash 4.4+, gum, curl, jq, less, Python 3.8+ (standard library only),
-GNU coreutils/findutils, procps-ng (`watch`). `unzip` is required for
-downloading llama.cpp releases. `xdg-open` is optional for the browser UI.
-NVIDIA monitoring requires a working driver and `nvidia-smi`.
-
-**NVIDIA GPU required for CUDA inference.** A compatible NVIDIA driver is
-needed (R525+ for CUDA 12). The installer downloads the llama.cpp backend on
-first use. Backend binaries are version-pinned and verified by SHA256 checksums.
-NVIDIA CUDA driver and runtime libraries are **not** bundled and must be
-installed separately.
-
-On Arch Linux / Omarchy, install missing userland dependencies:
-
-```bash
-sudo pacman -S --needed git bash gum curl jq less python coreutils findutils procps-ng util-linux xdg-utils shellcheck
-```
+---
 
 ## Extended vLLM Edition
 
-This release is the focused **GGUF / llama.cpp edition**.
+The `experimental/vllm` branch provides the multi-backend legacy edition with
+vLLM, HuggingFace Safetensors, and Mirai S plugin support:
 
-For users experimenting with HuggingFace Safetensors models, vLLM runtime
-management, and the Mirai S compressed-weight plugin:
+- **Branch:** [`experimental/vllm`](https://github.com/Ayshinko/ggufly/tree/experimental/vllm)
+- **Desktop entry:** "GGUFly — vLLM (Experimental)"
 
-- **Branch:** [`experimental/vllm`](https://github.com/Ayshinko/prism-model-manager/tree/experimental/vllm)
-- **Command:** `pmm-vllm` (side-by-side with official `pmm`)
-- **Desktop entry:** "Prism Model Manager — vLLM (Experimental)"
-
-The extended edition includes all features of this release plus:
+Features retained in the extended edition:
 - vLLM 0.30.0 managed Python environment
-- HuggingFace / Safetensors model directory support
-- Mirai S plugin with `--no-deps` managed installs
+- HuggingFace/Safetensors model directory support
+- Mirai S plugin with managed installs
 - GPU memory utilization control
-- KV cache dtype selection
-- Max model length (Auto / numeric)
-- Enforce eager mode (`--enforce-eager`) for low-VRAM GPUs
-- Backend-aware Settings and Status dashboard
+- vLLM/llama.cpp dual backend
 
-The extended edition is maintained separately and may diverge from the focused
-official release.
+The extended edition is maintained separately on `experimental/vllm` and may
+diverge from the focused official release.
 
-## Comparison with earlier releases
+---
 
-PMM versions 3.2–3.5 were multi-backend products supporting both llama.cpp
-and vLLM. Starting with v4.0.0, the **official edition** focuses exclusively
-on GGUF models through llama.cpp, providing a simpler and more polished
-experience for the primary use case.
+## History
 
-Users who need vLLM, HuggingFace, or Mirai S support should use the
-[`experimental/vllm`](https://github.com/Ayshinko/prism-model-manager/tree/experimental/vllm)
-branch, which preserves the complete multi-backend implementation including
-all real-host validated fixes from the v3.5.x development line.
+GGUFly was originally **Prism Model Manager** (`pmm`), a tool built for the
+Prism infrastructure with broader multi-backend support. In 2026 the project
+was renamed to **GGUFly** to reflect its focused scope: managing GGUF models
+with llama.cpp-compatible runtimes.
+
+The multi-backend legacy lives on in the
+[`experimental/vllm`](https://github.com/Ayshinko/ggufly/tree/experimental/vllm)
+branch.
+
+**Independent community project. Not affiliated with, endorsed by, or maintained
+by PrismML or Mirai Labs.**
+
+---
+
+## Version
+
+Version **1.0.0-dev**, licensed under the [MIT License](LICENSE).
+
+Originally developed on **Omarchy / Arch Linux.** The launcher uses standard
+Linux command-line tools and does not depend on Hyprland or an Omarchy desktop
+session. Other distributions may work with the dependencies above; they have
+not been validated by the maintainer.

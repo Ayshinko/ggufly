@@ -1,11 +1,11 @@
-"""Regression tests for v4 edition: disk check, codec detection, runtime registry.
+"""Regression tests for GGUFly edition: disk check, codec detection, runtime registry.
 
 These tests verify:
 1. Disk space float comparison (32.0 should not cause "integer expected")
 2. Target filesystem disk space (not $HOME)
 3. No hard-coded developer paths in installed artifacts
-4. Codec detection via prism-model-detect.py
-5. GGUF info via prism-gguf-info.py
+4. Codec detection via ggufly-model-detect.py
+5. GGUF info via ggufly-gguf-info.py
 """
 import os
 from pathlib import Path
@@ -64,10 +64,10 @@ class DiskCheckRegressionTests(unittest.TestCase):
                     'XDG_CONFIG_HOME': str(self.root / 'config'),
                     'XDG_STATE_HOME': str(self.root / 'state'),
                     'XDG_DATA_HOME': str(self.root / 'data'),
-                    'PMM_MODEL_ROOT': str(self.root),
-                    'PMM_SERVER_BIN': str(self.backend),
+                    'GGUFLY_MODEL_ROOT': str(self.root),
+                    'GGUFLY_SERVER_BIN': str(self.backend),
                     'TEST_MODEL': str(self.model), 'TEST_PORT': str(self.port)}
-        self.state = self.root / 'state/prism-model-manager'
+        self.state = self.root / 'state/ggufly'
 
     def cleanup_server(self):
         pidfile = self.state / 'server.pid'
@@ -80,7 +80,7 @@ class DiskCheckRegressionTests(unittest.TestCase):
             pass
 
     def run_shell(self, code, *, env=None, ok=True):
-        prefix = ('set -e\nsource "$1/bin/prism-model-manager"\n'
+        prefix = ('set -e\nsource "$1/bin/ggufly"\n'
                   'CURRENT_MODEL="$TEST_MODEL"\nPORT="$TEST_PORT"\n'
                   'pause() { :; }\ngum() { :; }\n')
         result = subprocess.run(
@@ -162,7 +162,7 @@ check_path="$CURRENT_MODEL"
 
     def test_no_hardcoded_ayshinko_paths_in_source(self):
         """Source code must not contain /home/ayshinko or AI-Workspace/pmm-source."""
-        source_file = ROOT / 'bin/prism-model-manager'
+        source_file = ROOT / 'bin/ggufly'
         content = source_file.read_text()
         self.assertNotIn('/home/ayshinko', content,
                          f"Hard-coded path /home/ayshinko found in {source_file}")
@@ -171,7 +171,7 @@ check_path="$CURRENT_MODEL"
 
     def test_no_hardcoded_ayshinko_paths_in_backend_manager(self):
         """Backend manager must not contain /home/ayshinko or AI-Workspace."""
-        source_file = ROOT / 'bin/prism-backend-manager'
+        source_file = ROOT / 'bin/ggufly-runtime-manager'
         content = source_file.read_text()
         self.assertNotIn('/home/ayshinko', content,
                          f"Hard-coded path /home/ayshinko found in {source_file}")
@@ -183,7 +183,7 @@ check_path="$CURRENT_MODEL"
     def test_codec_detection_unknown_for_minimal_gguf(self):
         """Minimal GGUF (no metadata keys) should return Unknown codec."""
         result = subprocess.run(
-            [sys.executable, str(ROOT / 'bin/prism-model-detect.py'), str(self.model)],
+            [sys.executable, str(ROOT / 'bin/ggufly-model-detect.py'), str(self.model)],
             capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         import json
@@ -202,7 +202,7 @@ check_path="$CURRENT_MODEL"
             f.write(s.pack('<Q', len(key)) + key)
             f.write(s.pack('<II', 4, 40))  # Q1_0
         result = subprocess.run(
-            [sys.executable, str(ROOT / 'bin/prism-model-detect.py'), str(model)],
+            [sys.executable, str(ROOT / 'bin/ggufly-model-detect.py'), str(model)],
             capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         import json
@@ -240,16 +240,16 @@ print('yes' if v >= 12000 else 'no')
     def test_runtime_registry_source(self):
         """Runtime registry must source cleanly."""
         code = '''
-source "$1/bin/prism-runtime-registry.sh"
+source "$1/bin/ggufly-runtime-registry.sh"
 # Should define key functions
 type runtime_registry_list_ids runtime_registry_get runtime_display_name runtime_is_managed runtime_binary >/dev/null 2>&1
 '''
         self.run_shell(code)
 
-    def test_prism_gguf_info_output(self):
-        """prism-gguf-info.py must read minimal GGUF without error."""
+    def test_ggufly_gguf_info_output(self):
+        """ggufly-gguf-info.py must read minimal GGUF without error."""
         result = subprocess.run(
-            [sys.executable, str(ROOT / 'bin/prism-gguf-info.py'), str(self.model)],
+            [sys.executable, str(ROOT / 'bin/ggufly-gguf-info.py'), str(self.model)],
             capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         # Should contain format field and basic keys
